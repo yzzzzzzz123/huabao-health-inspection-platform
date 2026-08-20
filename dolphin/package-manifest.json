@@ -4,7 +4,7 @@
   "platform": "dolphin-ai",
   "release_version": "v1.0.0",
   "workflow_version": "v1.0.0",
-  "skill_bundle_sha256": "b65c7c9eb105c10f5850ab0dc4e2e1490ee32125baf4098cc1bc94ddbc410c84",
+  "skill_bundle_sha256": "fea37bb5009d66e6461454825efae0f2b7db391162e261886de2bd3c67c15233",
   "schema_bundle_sha256": "e021464907119ef37be8a1e10cef6bad7414867f13b466409192647570a0cc86",
   "python": ">=3.11",
   "runtime_dependencies": [],

@@ -534,7 +534,18 @@ class WorkspaceClient:
             },
             expected={200, 201},
         )
-        return self._json(raw)
+        payload = self._json(raw)
+        sealed = WorkspaceBinding.from_payload(payload)
+        if (
+            sealed.run_id != binding.run_id
+            or sealed.business_date != binding.business_date
+            or sealed.incarnation_id != binding.incarnation_id
+            or sealed.platform_release_sha256
+            != binding.platform_release_sha256
+            or sealed.status != "sealed"
+        ):
+            raise WorkspaceConflictError("sealed workspace binding changed")
+        return payload
 
     def delete(self, binding: WorkspaceBinding) -> dict[str, Any]:
         _, _, raw = self._request(

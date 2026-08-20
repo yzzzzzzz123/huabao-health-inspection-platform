@@ -145,6 +145,17 @@
       "platform_release_sha256",
       "platform_release"
     ],
+    "delivery_manifest_phase": "pre_seal_snapshot",
+    "delivery_manifest_excludes": [
+      "orchestrator_delivery_manifest",
+      "orchestrator_workspace_index",
+      "orchestrator_archive_manifest"
+    ],
+    "server_final_snapshots": [
+      "orchestrator_workspace_index",
+      "orchestrator_archive_manifest"
+    ],
+    "server_owned_run_state_transition": "open_to_sealed",
     "seal_uses_actual_uploaded_manifest_sha256": true,
     "delivery": {
       "reporter_declares_intent_only": true,

@@ -41,6 +41,10 @@ run 支持 --stop-after 与 --resume。恢复必须同时提供创建响应中�
 workspace。恢复复用同一 incarnation，校验已有 artifact SHA，只补齐同一确定性
 attempt 的缺失项；成功 Stage 不可覆盖。
 
+成功 seal 的 CLI 顶层 `status`、`sealed` 与内层 seal receipt 必须同时表示完成态。
+delivery manifest 绑定封存前稳定集合；Server 校验后生成包含 sealed `run_state` 的
+workspace index 与 archive manifest，避免自引用并保留唯一受控状态跃迁。
+
 ## 迁移基线
 
 机械迁移来源标识为 HEAD 63ef013a003aad3057cc732105d45da16a4cd301，初始冻结工作树

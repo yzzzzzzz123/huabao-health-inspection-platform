@@ -622,8 +622,9 @@ def _run_fixture_conformance(
         stage0=stage0,
         stage_results=results,
     )
+    sealed_binding = WorkspaceBinding.from_payload(finalized["seal"])
     return {
-        **_binding_dict(binding),
+        **_binding_dict(sealed_binding),
         "sealed": True,
         "execution_mode": "fixture_conformance",
         "delivery_manifest_sha256": finalized["manifest_sha256"],
@@ -701,8 +702,9 @@ def _run_hosted_orchestration(
                 stage0=stage0,
                 stage_results=results,
             )
+            sealed_binding = WorkspaceBinding.from_payload(finalized["seal"])
             return {
-                **_binding_dict(binding),
+                **_binding_dict(sealed_binding),
                 "sealed": True,
                 "execution_mode": "dolphin_orchestrated",
                 "orchestrator_turns": turn,

@@ -69,6 +69,11 @@ platform_release_sha256 及服务器返回的严格七字段 platform_release。
 manifest 实际字节的 SHA-256。workspace index 与 archive manifest 由服务器生成，
 Dolphin 不写入。
 
+delivery manifest 是封存前稳定 artifact 集合的快照，按 artifact ID 排序并排除自身及
+两个仅能在 seal 阶段生成的服务器清单。Server 必须逐项复核其 ID、字节数、媒体类型、
+可见性和 SHA-256。封存时 `run_state` 从 `open` 到 `sealed` 是唯一允许的服务端哈希
+跃迁；workspace index 与 archive manifest 才是完成态权威快照。
+
 ## Backend
 
 生产 backend 只接受 Dolphin 托管执行返回的结构化响应。本地 fixture backend 必须由
