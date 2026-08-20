@@ -352,9 +352,12 @@ class WorkspaceService:
         ensure_git_root(self.project_root)
 
     def get_config(self) -> dict[str, Any]:
+        from shared.dingtalk import config_status
+
         return {
             **self.config.public_projection(),
             "artifact_contract_sha256": self.registry.contract_sha256,
+            "dingtalk": config_status(),
         }
 
     @staticmethod
@@ -1211,6 +1214,30 @@ class WorkspaceService:
             result.append(self._workspace_projection(run, self.store.list_artifacts(run["run_id"])))
         return result
 
+    def reconcile_completed_delivery(self, run_id: str) -> dict[str, Any]:
+        """Run one trusted post-seal delivery reconciliation under the run lock."""
+
+        from shared.dingtalk import deliver_report_automatically
+
+        with self._lock:
+            run = self._run_or_404(run_id)
+            if run["status"] != "sealed":
+                return {
+                    "available": False,
+                    "status": "unavailable",
+                    "automatic_action": "skipped",
+                    "unavailable_reason": "workspace is not sealed",
+                }
+            try:
+                return deliver_report_automatically(self._workspace_path(run))
+            except Exception as exc:
+                return {
+                    "available": False,
+                    "status": "failed",
+                    "automatic_action": "failed_safely",
+                    "error": f"DingTalk reconciliation failed ({type(exc).__name__})",
+                }
+
     def _verify_indexed_files(
         self,
         run: Mapping[str, Any],
@@ -1345,16 +1372,94 @@ class WorkspaceService:
         delivery = self._load_json_artifact(run, artifacts_by_id, "orchestrator_delivery_manifest")
         if not isinstance(delivery, dict):
             raise WorkspaceAPIError(422, "delivery_manifest_invalid", "delivery manifest must be an object")
+        required_delivery_keys = {
+            "schema_version",
+            "run_id",
+            "business_date",
+            "incarnation_id",
+            "platform_release_sha256",
+            "platform_release",
+            "status",
+            "artifacts",
+            "final_validation",
+            "created_at",
+        }
+        if set(delivery) != required_delivery_keys:
+            raise WorkspaceAPIError(
+                422,
+                "delivery_manifest_invalid",
+                "delivery manifest fields differ from the sealed contract",
+            )
         expected = {
+            "schema_version": "1.0",
             "run_id": run["run_id"],
             "business_date": run["business_date"],
             "incarnation_id": run["incarnation_id"],
             "platform_release_sha256": run["platform_release_sha256"],
             "platform_release": run["platform_release"],
+            "status": "awaiting_seal",
+            "created_at": run["created_at"],
         }
         for key, value in expected.items():
             if delivery.get(key) != value:
                 raise WorkspaceAPIError(409, "delivery_release_binding", f"delivery manifest {key} differs")
+        excluded_from_delivery = {
+            "orchestrator_delivery_manifest",
+            "orchestrator_workspace_index",
+            "orchestrator_archive_manifest",
+        }
+        open_run_state = _pretty_json_bytes(
+            {
+                "schema_version": "1.0",
+                "run_id": run["run_id"],
+                "business_date": run["business_date"],
+                "incarnation_id": run["incarnation_id"],
+                "status": "open",
+                "platform_release_sha256": run["platform_release_sha256"],
+                "created_at": run["created_at"],
+            }
+        )
+        expected_artifacts = []
+        for item in artifacts:
+            artifact_id = str(item["artifact_id"])
+            if artifact_id in excluded_from_delivery:
+                continue
+            if artifact_id == "run_state":
+                expected_artifacts.append(
+                    {
+                        "id": "run_state",
+                        "sha256": _sha256(open_run_state),
+                        "bytes": len(open_run_state),
+                        "media_type": "application/json",
+                        "ui_visible": self.registry.resolve("run_state").ui_visible,
+                    }
+                )
+                continue
+            expected_artifacts.append(
+                self._artifact_projection(item, self.registry.resolve(artifact_id))
+            )
+        expected_artifacts.sort(key=lambda item: str(item["id"]))
+        if delivery.get("artifacts") != expected_artifacts:
+            raise WorkspaceAPIError(
+                409,
+                "delivery_manifest_artifacts_mismatch",
+                "delivery manifest does not exactly bind the pre-seal artifact set",
+            )
+        expected_final_validation = {
+            "stage0_integrity": "passed",
+            "completed_stages": list(STAGE_NAMES),
+            "delivery_request": {
+                "channel": "dingtalk_custom_robot",
+                "mode": "automatic_after_finalize",
+                "send": True,
+            },
+        }
+        if delivery.get("final_validation") != expected_final_validation:
+            raise WorkspaceAPIError(
+                422,
+                "delivery_manifest_final_validation",
+                "delivery manifest final validation differs from the fixed contract",
+            )
         return artifacts_by_id
 
     def _generate_seal_artifacts(

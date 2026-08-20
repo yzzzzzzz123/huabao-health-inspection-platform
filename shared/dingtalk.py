@@ -17,7 +17,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.client import HTTPException
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -50,22 +50,44 @@ SIGNING_SECRET_ENV = f"{CREDENTIAL_ENV_PREFIX}SIGNING_SECRET"
 AT_MOBILES_ENV = f"{CREDENTIAL_ENV_PREFIX}AT_MOBILES"
 AT_ALL_ENV = f"{CREDENTIAL_ENV_PREFIX}AT_ALL"
 DINGTALK_ENDPOINT = "https://oapi.dingtalk.com/robot/send"
-REPORT_ARTIFACT_ID = "daily-report-markdown"
+REPORT_ARTIFACT_ID = "reporter_daily_report_md"
 REPORT_RELATIVE_PATH = "result/05-reporter/daily-report.md"
-REPORT_JSON_ARTIFACT_ID = "daily-report-json"
+REPORT_JSON_ARTIFACT_ID = "reporter_daily_report_json"
 REPORT_JSON_RELATIVE_PATH = "result/05-reporter/daily-report.json"
+DELIVERY_MANIFEST_ARTIFACT_ID = "orchestrator_delivery_manifest"
+DELIVERY_MANIFEST_RELATIVE_PATH = "result/00-orchestrator/delivery-manifest.json"
+WORKSPACE_INDEX_ARTIFACT_ID = "orchestrator_workspace_index"
+WORKSPACE_INDEX_RELATIVE_PATH = "context/00-orchestrator/workspace-index.json"
+ARCHIVE_MANIFEST_RELATIVE_PATH = "context/00-orchestrator/archive-manifest.json"
+PLATFORM_RELEASE_ARTIFACT_ID = "platform_release"
+PLATFORM_RELEASE_RELATIVE_PATH = "input/00-orchestrator/platform-release.json"
+STAGE_NAMES = (
+    "data_operator",
+    "inspector",
+    "diagnostician",
+    "advisor",
+    "auditor",
+    "reporter",
+)
+DELIVERY_REQUEST = {
+    "channel": "dingtalk_custom_robot",
+    "mode": "automatic_after_finalize",
+    "send": True,
+}
 MAX_MESSAGE_BYTES = 18_000
 MAX_REPORT_CHUNK_BYTES = 16_500
 MIN_PART_INTERVAL_SECONDS = 3.2
 DEFAULT_TIMEOUT_SECONDS = 15.0
-DINGTALK_ADAPTER_VERSION = "2.0"
-RECEIPT_SCHEMA_VERSION = "2.0"
-DIRECT_TERMINATION_ALERT_SCHEMA_VERSION = "1.0"
+DINGTALK_ADAPTER_VERSION = "3.0"
+RECEIPT_SCHEMA_VERSION = "3.0"
+DIRECT_TERMINATION_ALERT_SCHEMA_VERSION = "2.0"
 DIRECT_TERMINATION_CLASSIFICATIONS = frozenset(
     {"environment_configuration", "infrastructure_configuration"}
 )
 CHANNEL_LOCK_NAME = ".dingtalk-channel.lock"
 CHANNEL_RATE_FILE = "channel-rate.json"
+RECEIPTS_DIR_NAME = "receipts"
+LOCKS_DIR_NAME = "locks"
 _EXPLICIT_CHILD_SECRET_ENV_NAMES = frozenset(
     {
         "ANTHROPIC_API_KEY",
@@ -173,7 +195,9 @@ class ReportArtifact:
     worktree: Path
     run_id: str
     business_date: str
-    completed_at: str
+    incarnation_id: str
+    platform_release_sha256: str
+    sealed_at: str
     path: Path
     sha256: str
     markdown: str
@@ -323,146 +347,283 @@ def _require_clean_worktree(root: Path) -> None:
         raise DingTalkDeliveryError("完成态 worktree 已发生未封存改动，拒绝发送")
 
 
-def _require_completed_report(worktree: Path) -> ReportArtifact:
+def _read_regular_artifact(
+    root: Path,
+    relative_path: str,
+    label: str,
+) -> tuple[Path, bytes]:
+    """Read one manifest-bound file without following a path component link."""
+
+    if not isinstance(relative_path, str) or not relative_path:
+        raise DingTalkDeliveryError(f"{label}路径无效")
+    pure_path = PurePosixPath(relative_path)
+    if (
+        pure_path.is_absolute()
+        or pure_path.as_posix() != relative_path
+        or "\\" in relative_path
+        or ":" in relative_path
+        or any(part in {"", ".", ".."} for part in pure_path.parts)
+    ):
+        raise DingTalkDeliveryError(f"{label}路径不符合封存合同")
+    current = root
+    for index, part in enumerate(pure_path.parts):
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise DingTalkDeliveryError(
+                f"无法读取{label}（{type(exc).__name__}）"
+            ) from None
+        if stat.S_ISLNK(metadata.st_mode):
+            raise DingTalkDeliveryError(f"{label}路径包含符号链接")
+        if index < len(pure_path.parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            raise DingTalkDeliveryError(f"{label}父路径不是可信目录")
+        if index == len(pure_path.parts) - 1 and not stat.S_ISREG(metadata.st_mode):
+            raise DingTalkDeliveryError(f"{label}不是可信普通文件")
+    try:
+        payload = current.read_bytes()
+    except OSError as exc:
+        raise DingTalkDeliveryError(
+            f"无法读取{label}（{type(exc).__name__}）"
+        ) from None
+    return current, payload
+
+
+def _decode_json_object(payload: bytes, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise DingTalkDeliveryError(f"{label}不是有效 UTF-8 JSON") from None
+    if not isinstance(value, dict):
+        raise DingTalkDeliveryError(f"{label}顶层必须是 JSON object")
+    return value
+
+
+def _require_sealed_report(worktree: Path) -> ReportArtifact:
     root = worktree.expanduser().resolve()
     if not root.is_dir():
         raise DingTalkDeliveryError("运行 worktree 不存在")
 
-    state_path = root / "context" / "run.json"
-    manifest_path = root / "result" / "00-orchestrator" / "delivery-manifest.json"
-    report_json_path = root / REPORT_JSON_RELATIVE_PATH
-    if (
-        not state_path.is_file()
-        or not manifest_path.is_file()
-        or not report_json_path.is_file()
-    ):
-        raise DingTalkDeliveryError("运行尚未生成完成态和交付清单")
+    fixed_files = {
+        "run_state": ("context/run.json", "运行状态"),
+        DELIVERY_MANIFEST_ARTIFACT_ID: (
+            DELIVERY_MANIFEST_RELATIVE_PATH,
+            "交付清单",
+        ),
+        WORKSPACE_INDEX_ARTIFACT_ID: (
+            WORKSPACE_INDEX_RELATIVE_PATH,
+            "工作区索引",
+        ),
+        "archive_manifest": (ARCHIVE_MANIFEST_RELATIVE_PATH, "归档清单"),
+        PLATFORM_RELEASE_ARTIFACT_ID: (
+            PLATFORM_RELEASE_RELATIVE_PATH,
+            "平台版本绑定",
+        ),
+        REPORT_ARTIFACT_ID: (REPORT_RELATIVE_PATH, "Stage 5 Markdown 报告"),
+        REPORT_JSON_ARTIFACT_ID: (
+            REPORT_JSON_RELATIVE_PATH,
+            "Stage 5 业务 JSON",
+        ),
+    }
+    raw_files: dict[str, tuple[Path, bytes]] = {}
+    for artifact_id, (relative_path, label) in fixed_files.items():
+        raw_files[artifact_id] = _read_regular_artifact(root, relative_path, label)
 
-    state, _state_bytes = _read_json_document(state_path, "运行状态")
-    manifest, _manifest_bytes = _read_json_document(manifest_path, "交付清单")
-    if state.get("status") != "completed" or manifest.get("status") != "completed":
-        raise DingTalkDeliveryError("只有已完成运行的最终报告可以发送到钉钉")
-    if manifest.get("whitelist_check") != "passed":
-        raise DingTalkDeliveryError("交付清单尚未通过运行文件白名单检查")
-    if manifest.get("run_id") != state.get("run_id"):
-        raise DingTalkDeliveryError("运行状态与交付清单的 run_id 不一致")
-    if manifest.get("business_date") != state.get("business_date"):
-        raise DingTalkDeliveryError("运行状态与交付清单的业务日期不一致")
-    artifacts = manifest.get("artifacts", [])
-    if not isinstance(artifacts, list):
-        raise DingTalkDeliveryError("交付清单 artifacts 格式无效")
-
-    def require_artifact(artifact_id: str, relative_path: str) -> dict[str, Any]:
-        matches = [
-            item
-            for item in artifacts
-            if isinstance(item, dict) and item.get("artifact_id") == artifact_id
-        ]
-        if len(matches) != 1:
-            raise DingTalkDeliveryError(f"交付清单中的 {artifact_id} 必须唯一")
-        artifact = matches[0]
-        if artifact.get("path") != relative_path:
-            raise DingTalkDeliveryError(f"{artifact_id} 路径不符合固定合同")
-        return artifact
-
-    artifact = require_artifact(REPORT_ARTIFACT_ID, REPORT_RELATIVE_PATH)
-    report_json_artifact = require_artifact(
-        REPORT_JSON_ARTIFACT_ID,
-        REPORT_JSON_RELATIVE_PATH,
+    state = _decode_json_object(raw_files["run_state"][1], "运行状态")
+    manifest = _decode_json_object(
+        raw_files[DELIVERY_MANIFEST_ARTIFACT_ID][1], "交付清单"
+    )
+    workspace_index = _decode_json_object(
+        raw_files[WORKSPACE_INDEX_ARTIFACT_ID][1], "工作区索引"
+    )
+    archive_manifest = _decode_json_object(
+        raw_files["archive_manifest"][1], "归档清单"
+    )
+    platform_release = _decode_json_object(
+        raw_files[PLATFORM_RELEASE_ARTIFACT_ID][1], "平台版本绑定"
     )
 
-    report_path = (root / REPORT_RELATIVE_PATH).resolve()
-    if root not in report_path.parents or not report_path.is_file():
-        raise DingTalkDeliveryError("每日管理报告文件不存在或路径越界")
-    resolved_report_json_path = report_json_path.resolve()
-    if root not in resolved_report_json_path.parents or not report_json_path.is_file():
-        raise DingTalkDeliveryError("Stage 5 业务 JSON 不存在或路径越界")
+    if state.get("status") != "sealed" or not str(state.get("sealed_at") or "").strip():
+        raise DingTalkDeliveryError("只有含 sealed_at 的 sealed 运行可以发送到钉钉")
+    if manifest.get("status") != "awaiting_seal":
+        raise DingTalkDeliveryError("交付清单不处于固定 awaiting_seal 状态")
+    if workspace_index.get("status") != "sealed":
+        raise DingTalkDeliveryError("工作区索引不处于 sealed 状态")
+    if workspace_index.get("workspace_version") != "2.0":
+        raise DingTalkDeliveryError("工作区索引不是 Workspace API v2 封存投影")
+    if archive_manifest.get("workspace_version") != "2.0":
+        raise DingTalkDeliveryError("归档清单不是 Workspace API v2 封存投影")
 
-    try:
-        report_bytes = report_path.read_bytes()
-        report_json_bytes = report_json_path.read_bytes()
-    except OSError as exc:
-        raise DingTalkDeliveryError(
-            f"无法读取 Stage 5 正式报告（{type(exc).__name__}）"
-        ) from None
-    report_sha256 = sha256_bytes(report_bytes)
-    report_json_sha256 = sha256_bytes(report_json_bytes)
-    if (
-        len(report_bytes) != artifact.get("bytes")
-        or report_sha256 != artifact.get("sha256")
+    identity = {
+        "run_id": state.get("run_id"),
+        "business_date": state.get("business_date"),
+        "incarnation_id": state.get("incarnation_id"),
+        "platform_release_sha256": state.get("platform_release_sha256"),
+    }
+    for label, document in (
+        ("交付清单", manifest),
+        ("工作区索引", workspace_index),
+        ("归档清单", archive_manifest),
     ):
-        raise DingTalkDeliveryError("每日管理报告哈希与交付清单不一致")
+        if any(document.get(key) != value for key, value in identity.items()):
+            raise DingTalkDeliveryError(f"{label}与 sealed 运行身份或 release SHA 不一致")
+    sealed_at = str(state["sealed_at"])
     if (
-        len(report_json_bytes) != report_json_artifact.get("bytes")
-        or report_json_sha256 != report_json_artifact.get("sha256")
+        workspace_index.get("sealed_at") != sealed_at
+        or archive_manifest.get("sealed_at") != sealed_at
     ):
-        raise DingTalkDeliveryError("Stage 5 业务 JSON 哈希与交付清单不一致")
+        raise DingTalkDeliveryError("sealed_at 在运行状态、工作区索引和归档清单间不一致")
 
-    final_validation = manifest.get("final_validation")
+    platform_release_sha256 = str(identity["platform_release_sha256"] or "")
     if (
-        not isinstance(final_validation, dict)
-        or final_validation.get("final_validation_passed") is not True
-        or final_validation.get("file_whitelist_passed") is not True
-        or final_validation.get("worktree_clean") is not True
-        or manifest.get("approved_projection_sha256")
-        != sha256_json(final_validation)
+        re.fullmatch(r"[a-f0-9]{64}", platform_release_sha256) is None
+        or sha256_bytes(raw_files[PLATFORM_RELEASE_ARTIFACT_ID][1])
+        != platform_release_sha256
     ):
-        raise DingTalkDeliveryError("交付清单没有可复核的通过态终审投影")
-    projected_artifacts = final_validation.get("artifact_hashes")
-    if not isinstance(projected_artifacts, list):
-        raise DingTalkDeliveryError("终审投影缺少 artifact 哈希")
-    for expected in (artifact, report_json_artifact):
-        projected = [
-            item
-            for item in projected_artifacts
-            if isinstance(item, dict)
-            and item.get("artifact_id") == expected.get("artifact_id")
-        ]
-        if len(projected) != 1 or any(
-            projected[0].get(key) != expected.get(key)
-            for key in ("path", "bytes", "sha256")
+        raise DingTalkDeliveryError("平台版本绑定的实际字节哈希与 release SHA 不一致")
+    if set(platform_release) != {
+        "platform",
+        "application_id",
+        "release_version",
+        "workflow_version",
+        "skill_bundle_sha256",
+        "schema_bundle_sha256",
+        "bound_at",
+    }:
+        raise DingTalkDeliveryError("平台版本绑定字段不符合固定合同")
+    for label, document in (
+        ("交付清单", manifest),
+        ("工作区索引", workspace_index),
+        ("归档清单", archive_manifest),
+    ):
+        if document.get("platform_release") != platform_release:
+            raise DingTalkDeliveryError(f"{label}中的平台版本投影与不可变绑定不一致")
+
+    records = archive_manifest.get("artifacts")
+    if not isinstance(records, list):
+        raise DingTalkDeliveryError("归档清单 artifacts 格式无效")
+    if archive_manifest.get("artifact_count") != len(records):
+        raise DingTalkDeliveryError("归档清单 artifact_count 与实际记录数不一致")
+    if archive_manifest.get("artifact_set_sha256") != sha256_bytes(
+        (canonical_json(records) + "\n").encode("utf-8")
+    ):
+        raise DingTalkDeliveryError("归档清单 artifact_set_sha256 无法复核")
+
+    archived: dict[str, dict[str, Any]] = {}
+    archived_paths: set[str] = set()
+    required_record_keys = {"id", "path", "sha256", "bytes", "media_type"}
+    for record in records:
+        if not isinstance(record, dict) or set(record) != required_record_keys:
+            raise DingTalkDeliveryError("归档清单 artifact 记录字段无效")
+        artifact_id = record.get("id")
+        relative_path = record.get("path")
+        if (
+            not isinstance(artifact_id, str)
+            or re.fullmatch(r"[a-z0-9_]+", artifact_id) is None
+            or artifact_id in archived
         ):
-            raise DingTalkDeliveryError("正式报告与终审 artifact 投影不一致")
+            raise DingTalkDeliveryError("归档清单 artifact ID 缺失、重复或无效")
+        if not isinstance(relative_path, str) or relative_path in archived_paths:
+            raise DingTalkDeliveryError("归档清单 artifact 路径缺失或重复")
+        artifact_path, artifact_bytes = _read_regular_artifact(
+            root, relative_path, f"归档 artifact {artifact_id}"
+        )
+        if (
+            not isinstance(record.get("bytes"), int)
+            or record["bytes"] < 0
+            or record["bytes"] != len(artifact_bytes)
+            or re.fullmatch(r"[a-f0-9]{64}", str(record.get("sha256", ""))) is None
+            or record["sha256"] != sha256_bytes(artifact_bytes)
+            or not isinstance(record.get("media_type"), str)
+            or not record["media_type"]
+        ):
+            raise DingTalkDeliveryError(f"归档 artifact {artifact_id} 的字节绑定无效")
+        archived[artifact_id] = {
+            **record,
+            "actual_path": artifact_path,
+            "actual_bytes": artifact_bytes,
+        }
+        archived_paths.add(relative_path)
+
+    required_paths = {
+        DELIVERY_MANIFEST_ARTIFACT_ID: DELIVERY_MANIFEST_RELATIVE_PATH,
+        WORKSPACE_INDEX_ARTIFACT_ID: WORKSPACE_INDEX_RELATIVE_PATH,
+        REPORT_ARTIFACT_ID: REPORT_RELATIVE_PATH,
+        REPORT_JSON_ARTIFACT_ID: REPORT_JSON_RELATIVE_PATH,
+        PLATFORM_RELEASE_ARTIFACT_ID: PLATFORM_RELEASE_RELATIVE_PATH,
+        "run_state": "context/run.json",
+    }
+    for artifact_id, expected_path in required_paths.items():
+        record = archived.get(artifact_id)
+        if record is None or record.get("path") != expected_path:
+            raise DingTalkDeliveryError(f"归档清单缺少固定路径 artifact：{artifact_id}")
+        if record["actual_bytes"] != raw_files[artifact_id][1]:
+            raise DingTalkDeliveryError(f"归档 artifact {artifact_id} 与固定文件字节不一致")
+
+    delivery_artifacts = manifest.get("artifacts")
+    if not isinstance(delivery_artifacts, list):
+        raise DingTalkDeliveryError("交付清单 artifacts 格式无效")
+    delivery_by_id: dict[str, dict[str, Any]] = {}
+    for item in delivery_artifacts:
+        artifact_id = item.get("id") if isinstance(item, dict) else None
+        if not isinstance(artifact_id, str) or artifact_id in delivery_by_id:
+            raise DingTalkDeliveryError("交付清单 artifact ID 缺失或重复")
+        delivery_by_id[artifact_id] = item
+    for artifact_id in (REPORT_ARTIFACT_ID, REPORT_JSON_ARTIFACT_ID):
+        item = delivery_by_id.get(artifact_id)
+        archived_item = archived[artifact_id]
+        if item is None or any(
+            item.get(key) != archived_item.get(key)
+            for key in ("sha256", "bytes", "media_type")
+        ):
+            raise DingTalkDeliveryError(f"交付清单未精确绑定 {artifact_id}")
+
+    expected_final_validation = {
+        "stage0_integrity": "passed",
+        "completed_stages": list(STAGE_NAMES),
+        "delivery_request": DELIVERY_REQUEST,
+    }
+    if manifest.get("final_validation") != expected_final_validation:
+        raise DingTalkDeliveryError("交付清单 final_validation 不符合固定三字段合同")
 
     try:
-        report_json = json.loads(report_json_bytes.decode("utf-8"))
-        markdown = report_bytes.decode("utf-8")
+        report_json = json.loads(raw_files[REPORT_JSON_ARTIFACT_ID][1].decode("utf-8"))
+        markdown = raw_files[REPORT_ARTIFACT_ID][1].decode("utf-8")
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise DingTalkDeliveryError("Stage 5 正式报告编码或 JSON 格式无效") from None
     if not isinstance(report_json, dict):
         raise DingTalkDeliveryError("Stage 5 业务 JSON 顶层必须是 object")
     delivery_request = report_json.get("delivery_request")
-    if delivery_request != {
-        "channel": "dingtalk_custom_robot",
-        "mode": "automatic_after_finalize",
-        "send": True,
-    }:
+    if delivery_request != DELIVERY_REQUEST:
         raise DingTalkDeliveryError("Stage 5 Reporter 未声明固定的钉钉自动投递请求")
     if not markdown.strip():
         raise DingTalkDeliveryError("每日管理报告为空")
 
-    run_id = str(state.get("run_id", ""))
+    run_id = str(identity["run_id"] or "")
     if not re.fullmatch(r"hi-[0-9]{4}-[0-9]{2}-[0-9]{2}", run_id):
         raise DingTalkDeliveryError("运行 ID 不符合每日巡检合同")
-    business_date = str(state.get("business_date", ""))
+    business_date = str(identity["business_date"] or "")
     if (
         report_json.get("run_id") != run_id
         or report_json.get("business_date") != business_date
         or report_json.get("stage") != "reporter"
         or report_json.get("status") != "completed"
     ):
-        raise DingTalkDeliveryError("Stage 5 业务 JSON 与完成态运行身份不一致")
-    completed_at = str(state.get("completed_at") or "").strip()
-    if not completed_at:
-        raise DingTalkDeliveryError("完成态缺少 completed_at，无法建立幂等投递身份")
+        raise DingTalkDeliveryError("Stage 5 业务 JSON 与 sealed 运行身份不一致")
+    incarnation_id = str(identity["incarnation_id"] or "")
+    if not incarnation_id:
+        raise DingTalkDeliveryError("sealed 运行缺少 incarnation_id")
     _require_clean_worktree(root)
+    report_bytes = raw_files[REPORT_ARTIFACT_ID][1]
     return ReportArtifact(
         worktree=root,
         run_id=run_id,
         business_date=business_date,
-        completed_at=completed_at,
-        path=report_path,
-        sha256=report_sha256,
+        incarnation_id=incarnation_id,
+        platform_release_sha256=platform_release_sha256,
+        sealed_at=sealed_at,
+        path=raw_files[REPORT_ARTIFACT_ID][0],
+        sha256=sha256_bytes(report_bytes),
         markdown=markdown,
         delivery_request=delivery_request,
     )
@@ -679,16 +840,19 @@ def _resolve_receipt_root(
 
 
 def _prepare_receipt_root(root: Path, *, worktree: Path) -> None:
-    """Create the fixed receipt directory without following symlink components."""
+    """Create fixed receipt/lock directories without following links."""
 
     expected = worktree / ".runtime" / "dingtalk"
     if os.path.abspath(root) != os.path.abspath(expected):
         raise DingTalkDeliveryError(
             "钉钉 receipt 只能保存在当前日期 worktree 的 .runtime/dingtalk 中"
         )
-    current = worktree
-    for component in (".runtime", "dingtalk"):
-        current = current / component
+    for current in (
+        worktree / ".runtime",
+        root,
+        root / RECEIPTS_DIR_NAME,
+        root / LOCKS_DIR_NAME,
+    ):
         try:
             metadata = current.lstat()
         except FileNotFoundError:
@@ -738,7 +902,12 @@ def _assert_receipt_root(root: Path) -> None:
 
     if root.name != "dingtalk" or root.parent.name != ".runtime":
         raise DingTalkDeliveryError("钉钉 receipt 根目录身份无效", uncertain=True)
-    for path in (root.parent, root):
+    for path in (
+        root.parent,
+        root,
+        root / RECEIPTS_DIR_NAME,
+        root / LOCKS_DIR_NAME,
+    ):
         try:
             metadata = path.lstat()
         except OSError as exc:
@@ -751,13 +920,21 @@ def _assert_receipt_root(root: Path) -> None:
 
 
 def _receipt_key(report: ReportArtifact) -> str:
-    identity = f"{report.run_id}\n{report.completed_at}\n{report.sha256}"
+    identity = "\n".join(
+        (
+            report.run_id,
+            report.incarnation_id,
+            report.platform_release_sha256,
+            report.sealed_at,
+            report.sha256,
+        )
+    )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _receipt_path(root: Path, receipt_key: str) -> Path:
     _require_receipt_key(receipt_key)
-    return root / f"{receipt_key}.json"
+    return root / RECEIPTS_DIR_NAME / f"{receipt_key}.json"
 
 
 def _load_receipt(root: Path, receipt_key: str) -> dict[str, Any]:
@@ -795,7 +972,9 @@ def _validate_receipt(
         "channel": "dingtalk_custom_robot",
         "run_id": report.run_id,
         "business_date": report.business_date,
-        "completed_at_source": report.completed_at,
+        "incarnation_id": report.incarnation_id,
+        "platform_release_sha256": report.platform_release_sha256,
+        "sealed_at_source": report.sealed_at,
         "report_sha256": report.sha256,
         "receipt_key": receipt_key,
     }
@@ -868,7 +1047,7 @@ def _archive_receipt(root: Path, receipt_key: str) -> None:
     path = _receipt_path(root, receipt_key)
     if _lstat_regular_or_missing(path, "钉钉投递 receipt") is None:
         return
-    archive = root / (
+    archive = root / RECEIPTS_DIR_NAME / (
         f"{receipt_key}.superseded-{int(time.time() * 1000)}.json"
     )
     try:
@@ -900,7 +1079,7 @@ def _archive_receipt(root: Path, receipt_key: str) -> None:
 def _delivery_lock(root: Path, receipt_key: str) -> Iterator[None]:
     _assert_receipt_root(root)
     _require_receipt_key(receipt_key)
-    lock_path = root / f".{receipt_key}.lock"
+    lock_path = root / LOCKS_DIR_NAME / f".{receipt_key}.lock"
     _lstat_regular_or_missing(lock_path, "钉钉投递锁")
     flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -927,7 +1106,7 @@ def _delivery_lock(root: Path, receipt_key: str) -> Iterator[None]:
 @contextmanager
 def _channel_lock(root: Path) -> Iterator[None]:
     _assert_receipt_root(root)
-    lock_path = root / CHANNEL_LOCK_NAME
+    lock_path = root / LOCKS_DIR_NAME / CHANNEL_LOCK_NAME
     _lstat_regular_or_missing(lock_path, "钉钉通道锁")
     flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -953,7 +1132,7 @@ def _delivery_lock_is_held(root: Path, receipt_key: str) -> bool:
         _assert_receipt_root(root)
     except DingTalkDeliveryError:
         return True
-    lock_path = root / f".{receipt_key}.lock"
+    lock_path = root / LOCKS_DIR_NAME / f".{receipt_key}.lock"
     try:
         metadata = _lstat_regular_or_missing(lock_path, "钉钉投递锁")
     except DingTalkDeliveryError:
@@ -983,7 +1162,7 @@ def _wait_for_channel_slot(
     clock: Callable[[], float],
 ) -> None:
     _assert_receipt_root(root)
-    path = root / CHANNEL_RATE_FILE
+    path = root / LOCKS_DIR_NAME / CHANNEL_RATE_FILE
     now = clock()
     last_attempt = 0.0
     metadata = _lstat_regular_or_missing(path, "钉钉通道限流状态")
@@ -1050,7 +1229,9 @@ def _new_receipt(
         "channel": "dingtalk_custom_robot",
         "run_id": report.run_id,
         "business_date": report.business_date,
-        "completed_at_source": report.completed_at,
+        "incarnation_id": report.incarnation_id,
+        "platform_release_sha256": report.platform_release_sha256,
+        "sealed_at_source": report.sealed_at,
         "report_sha256": report.sha256,
         "receipt_key": receipt_key,
         "requested_by": "reporter_agent",
@@ -1093,7 +1274,7 @@ def delivery_status(
         "sent_part_count": 0,
     }
     try:
-        report = _require_completed_report(worktree)
+        report = _require_sealed_report(worktree)
     except DingTalkDeliveryError as exc:
         result["unavailable_reason"] = str(exc)
         return result
@@ -1216,19 +1397,29 @@ def send_completed_report(
     clock: Callable[[], float] = time.time,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
-    report = _require_completed_report(worktree)
+    report = _require_sealed_report(worktree)
     if dry_run:
         payloads = build_payloads(report)
+        receipt_root = _resolve_receipt_root(state_root, worktree=report.worktree)
         return {
             "status": "dry_run",
             "run_id": report.run_id,
             "business_date": report.business_date,
+            "incarnation_id": report.incarnation_id,
+            "platform_release_sha256": report.platform_release_sha256,
+            "sealed_at": report.sealed_at,
             "report_sha256": report.sha256,
             "report_bytes": len(report.markdown.encode("utf-8")),
             "part_count": len(payloads),
             "max_message_bytes": max(
                 len(item["markdown"]["text"].encode("utf-8")) for item in payloads
             ),
+            "receipt_directory": (
+                receipt_root / RECEIPTS_DIR_NAME
+            ).relative_to(report.worktree).as_posix(),
+            "lock_directory": (
+                receipt_root / LOCKS_DIR_NAME
+            ).relative_to(report.worktree).as_posix(),
             "network_requests": 0,
         }
 

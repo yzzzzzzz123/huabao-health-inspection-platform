@@ -32,6 +32,14 @@ or workflow scheduling decisions.
 - Seal creates server-owned workspace/archive manifests, checkpoints the daily
   branch, verifies Git clean, and copies only business runtime files to
   `history/YYYY-MM-DD`.
+- Seal verifies that the Dolphin delivery manifest exactly binds the sorted
+  pre-seal artifact set. The delivery manifest excludes itself and server-only
+  seal manifests; `run_state` changing from `open` to `sealed` is the only
+  permitted hash transition before the final workspace/archive snapshots.
+- A server-owned background reconciler wakes after seal, at startup, and on a
+  bounded interval. It may automatically continue only `not_sent` or `partial`
+  DingTalk receipts; an uncertain network result requires explicit trusted-CLI
+  recovery and never changes the authoritative sealed state.
 - Delete first closes writes, then removes the exact archive, Git worktree,
   daily branch, and SQLite run. Any residue keeps the run in deleting state.
 

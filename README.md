@@ -35,10 +35,25 @@ Dolphin, so an Agent virtual environment is not materialized in the Server
 worktree; the trusted Server process itself remains Python `>=3.11`
 standard-library only. These files never enter Git or the business archive.
 
+Completion delivery is reconciled by a server-owned background worker after
+seal, at service startup, and every five minutes. It validates the sealed
+workspace/index/archive chain before reading the Stage 5 Markdown. Missing
+credentials leave the report in `not_sent`; partial receipts may continue,
+while uncertain network results require explicit trusted-CLI recovery and are
+never retried automatically. Real DingTalk delivery still requires deployment
+secrets and a production endpoint check.
+
 `shared/.env` contains no real credentials. Before accepting a release, the
 server requires an exact match against
-`HUABAO_DOLPHIN_RELEASE_ALLOWLIST_JSON`. The placeholder bundle hashes must be
-replaced by the actual Dolphin release hashes during integration.
+`HUABAO_DOLPHIN_RELEASE_ALLOWLIST_JSON`. Its bundle hashes must exactly match
+the tracked Dolphin package manifest and the locally recomputed release.
+
+Automatic daily scheduling and browser dispatch remain fail-closed until a
+trusted Dolphin Gateway supplies readiness, idempotent dispatch, durable job
+status/heartbeat, and cancel acknowledgement. `inspection_schedule.py` is the
+Asia/Shanghai clock-policy helper only; the Server deliberately does not start
+it while `HUABAO_DOLPHIN_DISPATCH_URL` is empty. This avoids creating an
+orphaned daily worktree or claiming a workflow that cannot be supervised.
 
 ## API
 
@@ -132,6 +147,15 @@ attempt receipt per Stage, all registered Stage 1-5 outputs, and every required
 orchestrator artifact. Every selected receipt must declare `status` as exactly
 `completed` or `succeeded`, and must include
 `self_test: {"status":"passed","unresolved_issues":[]}`.
+
+The server also compares the delivery manifest's sorted artifact records with
+the complete indexed pre-seal set. The delivery manifest excludes itself and
+the two manifests that only the server can create during sealing. After that
+check, `run_state` makes its sole permitted lifecycle transition from `open` to
+`sealed`; the server-owned workspace index binds that sealed set, and the
+archive manifest binds the index plus every other final artifact while
+excluding only itself. This staged chain avoids self-reference while keeping
+the one server-owned hash transition explicit and auditable.
 
 Active workspaces cannot be deleted because this split has no Dolphin
 cancel/heartbeat ownership protocol. Deletion is accepted only for `sealed`,

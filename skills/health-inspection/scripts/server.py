@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,14 +28,75 @@ from workspace_api import WorkspaceAPIError, WorkspaceService  # noqa: E402
 RUN_ID_RE = re.compile(r"^hi-\d{4}-\d{2}-\d{2}$")
 ARTIFACT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+DELIVERY_RECONCILE_INTERVAL_SECONDS = 300.0
+
+
+class DeliveryReconciler:
+    """Server-owned, credential-isolated completion-delivery compensator."""
+
+    def __init__(
+        self,
+        service: WorkspaceService,
+        *,
+        interval_seconds: float = DELIVERY_RECONCILE_INTERVAL_SECONDS,
+    ) -> None:
+        self.service = service
+        self.interval_seconds = interval_seconds
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="huabao-dingtalk-reconciler",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+        self.wake()
+
+    def wake(self) -> None:
+        self._wake.set()
+
+    def close(self) -> None:
+        self._stop.set()
+        self._wake.set()
+        self._thread.join(timeout=30.0)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._wake.wait(self.interval_seconds)
+            self._wake.clear()
+            if self._stop.is_set():
+                return
+            try:
+                workspaces = self.service.list_workspaces()
+            except Exception:
+                continue
+            for workspace in workspaces:
+                if self._stop.is_set():
+                    return
+                if workspace.get("status") != "sealed":
+                    continue
+                try:
+                    self.service.reconcile_completed_delivery(str(workspace["run_id"]))
+                except Exception:
+                    # Completion remains authoritative. Receipt state decides
+                    # whether a later scan may safely compensate.
+                    continue
 
 
 class WorkspaceHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address: tuple[str, int], service: WorkspaceService) -> None:
+    def __init__(
+        self,
+        address: tuple[str, int],
+        service: WorkspaceService,
+        delivery_reconciler: DeliveryReconciler,
+    ) -> None:
         self.service = service
+        self.delivery_reconciler = delivery_reconciler
         super().__init__(address, WorkspaceRequestHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
@@ -276,6 +338,7 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                     release_sha256=release_sha,
                     delivery_manifest_sha256=manifest_sha,
                 )
+                self.server.delivery_reconciler.wake()
                 self._send_json(HTTPStatus.OK, response)
                 return
             raise WorkspaceAPIError(404, "route_not_found", "route does not exist")
@@ -375,7 +438,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         port = arguments.port or service.config.port
         if host not in LOOPBACK_HOSTS:
             raise RuntimeEnvironmentError("HTTP server may bind only to loopback")
-        httpd = WorkspaceHTTPServer((host, port), service)
+        delivery_reconciler = DeliveryReconciler(service)
+        httpd = WorkspaceHTTPServer((host, port), service, delivery_reconciler)
+        delivery_reconciler.start()
         print(f"Huabao Workspace Server listening on http://{host}:{port}", flush=True)
         try:
             httpd.serve_forever(poll_interval=0.5)
@@ -383,6 +448,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             pass
         finally:
             httpd.server_close()
+            delivery_reconciler.close()
         return 0
     except (RuntimeEnvironmentError, WorkspaceAPIError, OSError) as exc:
         print(
