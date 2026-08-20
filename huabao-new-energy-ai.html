@@ -1,0 +1,1985 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#102d3c">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <title>华宝新能 · 健康巡检工作台</title>
+  <style>
+    :root {
+      --paper: #eee7d6;
+      --paper-raised: #f7f1e3;
+      --paper-deep: #ded4bd;
+      --ink: #102d3c;
+      --ink-soft: #3f5962;
+      --rule: #8d948c;
+      --rule-light: rgba(16, 45, 60, 0.16);
+      --orange: #dd5d22;
+      --orange-dark: #a83d14;
+      --cyan: #008b92;
+      --cyan-dark: #00656b;
+      --green: #24715f;
+      --red: #a33b31;
+      --amber: #9e6d12;
+      --white: #fffdf6;
+      --shadow: 7px 7px 0 rgba(16, 45, 60, 0.12);
+      --sans: Bahnschrift, "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --mono: "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.55;
+      background-color: var(--paper);
+      background-image:
+        linear-gradient(rgba(16, 45, 60, 0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 45, 60, 0.055) 1px, transparent 1px),
+        linear-gradient(rgba(221, 93, 34, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(221, 93, 34, 0.035) 1px, transparent 1px);
+      background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+    }
+
+    button, input { font: inherit; }
+
+    button { color: inherit; }
+
+    button:focus-visible,
+    input:focus-visible,
+    a:focus-visible {
+      outline: 3px solid var(--orange);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 100;
+      top: 10px;
+      left: 10px;
+      padding: 10px 14px;
+      color: var(--white);
+      background: var(--ink);
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell {
+      width: min(1480px, calc(100% - 36px));
+      margin: 18px auto 34px;
+      border: 1px solid var(--ink);
+      background: rgba(247, 241, 227, 0.9);
+      box-shadow: var(--shadow);
+      animation: ledger-settle 520ms cubic-bezier(.2, .8, .2, 1) both;
+    }
+
+    .system-strip {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 16px;
+      min-height: 38px;
+      padding: 7px 18px;
+      color: var(--white);
+      background: var(--ink);
+      border-bottom: 4px solid var(--orange);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .system-strip__rule {
+      height: 1px;
+      background: repeating-linear-gradient(90deg, rgba(255,255,255,.42) 0 10px, transparent 10px 16px);
+    }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    .lamp {
+      width: 9px;
+      height: 9px;
+      border: 1px solid currentColor;
+      background: var(--amber);
+      box-shadow: 0 0 0 2px rgba(255,255,255,.12);
+    }
+
+    .lamp[data-tone="ready"] { background: #4bc6b2; }
+    .lamp[data-tone="error"] { background: #ff735f; }
+    .lamp[data-tone="busy"] { background: #ffab45; animation: signal-pulse 900ms ease-in-out infinite alternate; }
+
+    .masthead {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+      gap: 28px;
+      padding: 34px 34px 30px;
+      overflow: hidden;
+      border-bottom: 1px solid var(--ink);
+    }
+
+    .masthead::after {
+      content: "";
+      position: absolute;
+      right: -56px;
+      bottom: 17px;
+      width: 330px;
+      height: 18px;
+      background: var(--orange);
+      transform: rotate(-6deg);
+      opacity: .92;
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 12px;
+      color: var(--orange-dark);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 34px;
+      height: 4px;
+      background: var(--orange);
+    }
+
+    h1 {
+      max-width: 820px;
+      margin: 0;
+      font-size: clamp(34px, 5vw, 68px);
+      font-weight: 750;
+      line-height: .98;
+      letter-spacing: -0.055em;
+    }
+
+    .masthead__copy {
+      max-width: 760px;
+      margin: 20px 0 0;
+      color: var(--ink-soft);
+      font-size: 15px;
+    }
+
+    .scope-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      margin-top: 22px;
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    .scope-line span::before {
+      content: "/";
+      margin-right: 6px;
+      color: var(--cyan);
+    }
+
+    .release-plate {
+      position: relative;
+      z-index: 1;
+      align-self: start;
+      padding: 19px 20px 17px;
+      border: 2px solid var(--ink);
+      background: var(--paper-raised);
+      box-shadow: 5px 5px 0 var(--cyan);
+    }
+
+    .release-plate::before,
+    .release-plate::after,
+    .panel::before,
+    .panel::after {
+      content: "";
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border: 1px solid var(--ink);
+      border-radius: 50%;
+      background: var(--paper-deep);
+    }
+
+    .release-plate::before { top: 6px; left: 6px; }
+    .release-plate::after { right: 6px; bottom: 6px; }
+
+    .plate-label {
+      margin: 0;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .plate-value {
+      margin: 4px 0 13px;
+      font-family: var(--mono);
+      font-size: clamp(19px, 2.6vw, 30px);
+      font-weight: 800;
+      letter-spacing: -.035em;
+      overflow-wrap: anywhere;
+    }
+
+    .plate-state {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-top: 11px;
+      border-top: 1px dashed var(--rule);
+      font-size: 12px;
+    }
+
+    .stamp {
+      display: inline-block;
+      padding: 4px 8px 3px;
+      border: 1px solid currentColor;
+      color: var(--amber);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      transform: rotate(-1deg);
+    }
+
+    .stamp[data-tone="ready"] { color: var(--green); }
+    .stamp[data-tone="error"] { color: var(--red); }
+
+    main { padding: 0 34px 34px; }
+
+    .section-kicker {
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      margin: 0 0 17px;
+    }
+
+    .section-kicker__number {
+      color: var(--orange);
+      font-family: var(--mono);
+      font-size: 30px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .section-kicker h2 {
+      margin: 0;
+      font-size: 19px;
+      letter-spacing: .02em;
+    }
+
+    .section-kicker p {
+      margin: 2px 0 0 auto;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      text-align: right;
+    }
+
+    .control-deck {
+      display: grid;
+      grid-template-columns: minmax(270px, .8fr) minmax(0, 1.7fr);
+      gap: 0;
+      margin-top: 28px;
+      border: 2px solid var(--ink);
+      background: var(--paper-raised);
+    }
+
+    .control-form {
+      padding: 24px;
+      border-right: 1px solid var(--ink);
+      background:
+        repeating-linear-gradient(-45deg, transparent 0 12px, rgba(16,45,60,.025) 12px 13px);
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .date-control {
+      width: 100%;
+      min-height: 52px;
+      padding: 10px 12px;
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: var(--white);
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    .field-hint {
+      margin: 8px 0 17px;
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .action-button {
+      min-height: 42px;
+      padding: 9px 14px;
+      border: 1px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+      transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+    }
+
+    .action-button:hover:not(:disabled) {
+      transform: translate(-2px, -2px);
+      box-shadow: 3px 3px 0 var(--ink);
+    }
+
+    .action-button:active:not(:disabled) {
+      transform: translate(0, 0);
+      box-shadow: none;
+    }
+
+    .action-button--primary {
+      color: var(--white);
+      background: var(--orange);
+      border-color: var(--orange-dark);
+    }
+
+    .action-button--cyan {
+      color: var(--white);
+      background: var(--cyan-dark);
+    }
+
+    .action-button--danger {
+      color: var(--red);
+      border-color: var(--red);
+    }
+
+    .action-button--danger:hover:not(:disabled) {
+      color: var(--white);
+      background: var(--red);
+      box-shadow: 3px 3px 0 #5d1711;
+    }
+
+    .action-button:disabled {
+      cursor: not-allowed;
+      opacity: .43;
+      filter: grayscale(.55);
+    }
+
+    .control-readout {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+      border-left: 8px solid var(--ink);
+    }
+
+    .readout-cell {
+      min-height: 88px;
+      padding: 16px 18px;
+      border-right: 1px solid var(--rule-light);
+      border-bottom: 1px solid var(--rule-light);
+    }
+
+    .readout-cell:nth-child(even) { border-right: 0; }
+    .readout-cell:nth-last-child(-n+2) { border-bottom: 0; }
+
+    .readout-label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .readout-value {
+      display: block;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .status-value {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-value::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      background: var(--rule);
+    }
+
+    .status-value[data-tone="success"]::before { background: var(--green); }
+    .status-value[data-tone="active"]::before { background: var(--cyan); }
+    .status-value[data-tone="warning"]::before { background: var(--amber); }
+    .status-value[data-tone="error"]::before { background: var(--red); }
+
+    .workflow-readout {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 12px;
+      border-left: 4px solid var(--amber);
+      background: rgba(158, 109, 18, .08);
+      font-size: 12px;
+    }
+
+    .workflow-readout[data-mode="ready"] {
+      border-left-color: var(--cyan);
+      background: rgba(0, 139, 146, .08);
+    }
+
+    .workflow-readout__mark {
+      flex: 0 0 auto;
+      color: var(--amber);
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .workflow-readout[data-mode="ready"] .workflow-readout__mark { color: var(--cyan-dark); }
+
+    .notice {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 13px;
+      align-items: start;
+      margin: 18px 0 0;
+      padding: 14px 16px;
+      border: 1px solid var(--ink);
+      border-left-width: 8px;
+      background: var(--paper-raised);
+    }
+
+    .notice[hidden] { display: none; }
+    .notice[data-tone="error"] { border-left-color: var(--red); }
+    .notice[data-tone="warning"] { border-left-color: var(--amber); }
+    .notice[data-tone="success"] { border-left-color: var(--green); }
+    .notice[data-tone="info"] { border-left-color: var(--cyan); }
+
+    .notice__code {
+      min-width: 48px;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .notice__title {
+      display: block;
+      margin-bottom: 2px;
+      font-weight: 800;
+    }
+
+    .notice__detail,
+    .notice__hint { margin: 0; }
+    .notice__detail { color: var(--ink-soft); }
+    .notice__hint { margin-top: 5px; font-size: 12px; }
+
+    .notice__close {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--ink);
+      background: transparent;
+      cursor: pointer;
+      font-family: var(--mono);
+    }
+
+    .panel {
+      position: relative;
+      margin-top: 24px;
+      padding: 24px;
+      border: 1px solid var(--ink);
+      background: rgba(247, 241, 227, .78);
+    }
+
+    .panel::before { top: 7px; left: 7px; }
+    .panel::after { right: 7px; bottom: 7px; }
+
+    .panel--ink {
+      color: var(--white);
+      background: var(--ink);
+      border-color: var(--ink);
+    }
+
+    .panel--ink::before,
+    .panel--ink::after { border-color: var(--white); background: var(--cyan-dark); }
+
+    .binding-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin: 0;
+      border-top: 1px solid rgba(255,255,255,.42);
+      border-left: 1px solid rgba(255,255,255,.42);
+    }
+
+    .binding-item {
+      min-width: 0;
+      padding: 13px 14px;
+      border-right: 1px solid rgba(255,255,255,.42);
+      border-bottom: 1px solid rgba(255,255,255,.42);
+    }
+
+    .binding-item--wide { grid-column: span 2; }
+
+    .binding-item dt {
+      margin: 0 0 6px;
+      color: #a9d8d5;
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .binding-item dd {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .track-header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      margin-bottom: 21px;
+    }
+
+    .track-meter {
+      flex: 1;
+      height: 8px;
+      border: 1px solid var(--ink);
+      background: var(--paper-deep);
+      overflow: hidden;
+    }
+
+    .track-meter__fill {
+      width: var(--track-progress, 0%);
+      height: 100%;
+      background: var(--cyan);
+      transition: width 360ms ease;
+    }
+
+    .track-count {
+      min-width: 58px;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .stage-track {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .stage-track::before {
+      content: "";
+      position: absolute;
+      z-index: 0;
+      top: 24px;
+      right: 4%;
+      left: 4%;
+      height: 2px;
+      background: repeating-linear-gradient(90deg, var(--rule) 0 8px, transparent 8px 14px);
+    }
+
+    .stage-node {
+      position: relative;
+      z-index: 1;
+      min-width: 0;
+      padding-top: 48px;
+    }
+
+    .stage-node::before {
+      content: "";
+      position: absolute;
+      top: 15px;
+      left: calc(50% - 10px);
+      width: 20px;
+      height: 20px;
+      border: 3px solid var(--paper-raised);
+      outline: 1px solid var(--ink);
+      background: var(--paper-deep);
+    }
+
+    .stage-node[data-tone="success"]::before { background: var(--green); }
+    .stage-node[data-tone="active"]::before { background: var(--cyan); animation: signal-pulse 900ms ease-in-out infinite alternate; }
+    .stage-node[data-tone="warning"]::before { background: var(--amber); }
+    .stage-node[data-tone="error"]::before { background: var(--red); }
+
+    .stage-node__body {
+      min-height: 112px;
+      padding: 12px 11px;
+      border: 1px solid var(--ink);
+      border-top: 5px solid var(--rule);
+      background: var(--paper-raised);
+    }
+
+    .stage-node[data-tone="success"] .stage-node__body { border-top-color: var(--green); }
+    .stage-node[data-tone="active"] .stage-node__body { border-top-color: var(--cyan); }
+    .stage-node[data-tone="warning"] .stage-node__body { border-top-color: var(--amber); }
+    .stage-node[data-tone="error"] .stage-node__body { border-top-color: var(--red); }
+
+    .stage-index {
+      display: block;
+      color: var(--orange-dark);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .12em;
+    }
+
+    .stage-name {
+      display: block;
+      margin: 5px 0 10px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .stage-status {
+      display: block;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    .artifact-summary {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px;
+      margin: -5px 0 16px;
+      color: var(--ink-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, .32fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .snapshot-score {
+      display: grid;
+      place-content: center;
+      min-height: 170px;
+      border: 2px solid var(--ink);
+      background: var(--yellow);
+      text-align: center;
+      box-shadow: 6px 6px 0 var(--ink);
+    }
+
+    .snapshot-score strong { font-size: clamp(2.8rem, 8vw, 5.5rem); line-height: .9; }
+    .snapshot-score span { margin-top: 10px; font: 700 .72rem/1.2 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+
+    .snapshot-copy {
+      border: 1px solid var(--line);
+      padding: 18px;
+      background: var(--paper-deep);
+    }
+
+    .snapshot-copy h3 { margin: 0 0 8px; font-size: clamp(1.15rem, 2.2vw, 1.7rem); }
+    .snapshot-copy p { margin: 0; color: var(--muted); line-height: 1.65; }
+
+    .snapshot-columns {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .snapshot-column { border-top: 3px solid var(--ink); padding-top: 10px; }
+    .snapshot-column h3 { margin: 0 0 8px; font: 800 .72rem/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .snapshot-list { margin: 0; padding-left: 18px; color: var(--muted); }
+    .snapshot-list li { margin: 0 0 7px; line-height: 1.45; }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--ink);
+      background: var(--paper-raised);
+    }
+
+    table {
+      width: 100%;
+      min-width: 780px;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th, td {
+      padding: 12px 13px;
+      border-right: 1px solid var(--rule-light);
+      border-bottom: 1px solid var(--rule-light);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th:last-child, td:last-child { border-right: 0; }
+    tbody tr:last-child td { border-bottom: 0; }
+
+    th {
+      color: var(--white);
+      background: var(--ink);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    tbody tr:nth-child(even) { background: rgba(16,45,60,.035); }
+    tbody tr:hover { background: rgba(0,139,146,.075); }
+
+    td {
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .artifact-id { font-weight: 800; }
+    .hash-cell { color: var(--cyan-dark); }
+
+    .empty-ledger {
+      padding: 27px 20px;
+      border: 1px dashed var(--rule);
+      color: var(--ink-soft);
+      background: rgba(255,255,255,.2);
+      text-align: center;
+    }
+
+    .empty-ledger[hidden] { display: none; }
+
+    .journal-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border-top: 1px solid var(--ink);
+    }
+
+    .journal-item {
+      display: grid;
+      grid-template-columns: 84px 82px minmax(0, 1fr);
+      gap: 12px;
+      padding: 10px 4px;
+      border-bottom: 1px dotted var(--rule);
+      font-size: 12px;
+    }
+
+    .journal-time,
+    .journal-kind {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .journal-kind { color: var(--cyan-dark); }
+    .journal-item[data-tone="error"] .journal-kind { color: var(--red); }
+    .journal-item[data-tone="success"] .journal-kind { color: var(--green); }
+
+    .safety-band {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      margin-top: 24px;
+      border: 1px solid var(--ink);
+      background: var(--ink);
+    }
+
+    .safety-band div {
+      padding: 12px 14px;
+      color: var(--ink);
+      background: var(--paper-deep);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 16px 34px;
+      color: rgba(255,255,255,.75);
+      background: var(--ink);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .04em;
+    }
+
+    dialog {
+      width: min(560px, calc(100% - 28px));
+      padding: 0;
+      border: 2px solid var(--ink);
+      border-radius: 0;
+      color: var(--ink);
+      background: var(--paper-raised);
+      box-shadow: 10px 10px 0 rgba(0,0,0,.25);
+    }
+
+    dialog::backdrop { background: rgba(8, 25, 34, .72); }
+
+    .dialog-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      color: var(--white);
+      background: var(--red);
+    }
+
+    .dialog-head h2 { margin: 0; font-size: 17px; }
+
+    .dialog-close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(255,255,255,.7);
+      color: var(--white);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .dialog-body { padding: 22px; }
+
+    .delete-target {
+      padding: 10px 12px;
+      border-left: 4px solid var(--red);
+      background: rgba(163,59,49,.08);
+      font-family: var(--mono);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 9px;
+      margin-top: 18px;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @keyframes ledger-settle {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes signal-pulse {
+      from { box-shadow: 0 0 0 0 rgba(0,139,146,.1); }
+      to { box-shadow: 0 0 0 7px rgba(0,139,146,.2); }
+    }
+
+    @media (max-width: 980px) {
+      .masthead { grid-template-columns: 1fr; }
+      .release-plate { max-width: 560px; }
+      .control-deck { grid-template-columns: 1fr; }
+      .control-form { border-right: 0; border-bottom: 1px solid var(--ink); }
+      .control-readout { border-left: 0; border-top: 8px solid var(--ink); }
+      .binding-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .snapshot-columns { grid-template-columns: 1fr; }
+      .stage-track { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 18px; }
+      .stage-track::before { display: none; }
+      .stage-node { padding-top: 0; }
+      .stage-node::before { top: 12px; left: 12px; width: 12px; height: 12px; z-index: 2; }
+      .stage-node__body { padding-left: 34px; }
+    }
+
+    @media (max-width: 680px) {
+      .shell { width: calc(100% - 18px); margin: 9px auto 20px; box-shadow: 4px 4px 0 rgba(16,45,60,.12); }
+      .system-strip { grid-template-columns: 1fr auto; padding-inline: 12px; }
+      .system-strip__rule { display: none; }
+      .masthead { padding: 26px 18px 24px; }
+      h1 { font-size: clamp(35px, 12vw, 52px); }
+      main { padding: 0 14px 22px; }
+      .control-form, .panel { padding: 18px; }
+      .control-readout { grid-template-columns: 1fr; }
+      .readout-cell, .readout-cell:nth-child(even), .readout-cell:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--rule-light); }
+      .readout-cell:last-child { border-bottom: 0; }
+      .section-kicker { align-items: flex-start; }
+      .section-kicker p { display: none; }
+      .binding-grid { grid-template-columns: 1fr; }
+      .snapshot-grid { grid-template-columns: 1fr; }
+      .binding-item--wide { grid-column: auto; }
+      .stage-track { grid-template-columns: 1fr; }
+      .stage-node::before { top: 16px; }
+      .stage-node__body { min-height: 0; }
+      .journal-item { grid-template-columns: 72px 70px minmax(0, 1fr); gap: 7px; }
+      .safety-band { grid-template-columns: 1fr; }
+      footer { flex-direction: column; padding-inline: 18px; }
+      .notice { grid-template-columns: auto minmax(0, 1fr); }
+      .notice__close { grid-column: 2; justify-self: end; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#workspace-control">跳到工作区控制台</a>
+
+  <div class="shell">
+    <header>
+      <div class="system-strip" aria-label="系统连接状态">
+        <span>HBNE / HEALTH INSPECTION / TRUSTED CONSOLE</span>
+        <span class="system-strip__rule" aria-hidden="true"></span>
+        <span class="connection"><span class="lamp" id="connectionLamp" data-tone="busy" aria-hidden="true"></span><span id="connectionLabel">读取受信配置</span></span>
+      </div>
+
+      <div class="masthead">
+        <div>
+          <p class="eyebrow">Audit ledger 07 · 每日唯一工作区</p>
+          <h1>华宝新能<br>健康巡检工作台</h1>
+          <p class="masthead__copy">面向华宝新能站内健康巡检的可信控制面。浏览器只提交业务日期与已注册发布版本；身份、哈希、工作区和最终封存全部由服务器生成并校验。</p>
+          <div class="scope-line" aria-label="固定业务范围">
+            <span>Asia/Shanghai</span>
+            <span>CNY</span>
+            <span>流量 · 转化 · 商品</span>
+            <span>Stage 0—5</span>
+          </div>
+        </div>
+
+        <aside class="release-plate" aria-labelledby="registeredReleaseLabel">
+          <p class="plate-label" id="registeredReleaseLabel">Registered Dolphin Release</p>
+          <p class="plate-value" id="registeredReleaseValue">读取中…</p>
+          <div class="plate-state">
+            <span id="registeredApplication">huabao-health-inspection</span>
+            <span class="stamp" id="releaseStamp">VERIFYING</span>
+          </div>
+        </aside>
+      </div>
+    </header>
+
+    <main id="workspace-control">
+      <section aria-labelledby="controlHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">01</span>
+          <h2 id="controlHeading">工作区准入与控制</h2>
+          <p>CREATE → DISPATCH → REFRESH → SEAL</p>
+        </div>
+
+        <div class="control-deck">
+          <form class="control-form" id="workspaceForm" novalidate>
+            <label class="field-label" for="businessDate">业务日期 / YYYY-MM-DD</label>
+            <input class="date-control" id="businessDate" name="business_date" type="date" inputmode="numeric" required aria-describedby="businessDateHint">
+            <p class="field-hint" id="businessDateHint">Asia/Shanghai；同一日期只允许一个身份固定的工作区。</p>
+            <div class="button-row">
+              <button class="action-button action-button--primary" id="createButton" type="submit" disabled>创建工作区</button>
+              <button class="action-button" id="refreshButton" type="button" disabled>刷新状态</button>
+            </div>
+            <div class="workflow-readout" id="workflowReadout" data-mode="waiting">
+              <span class="workflow-readout__mark" aria-hidden="true">△</span>
+              <span id="workflowMode">等待托管工作流</span>
+            </div>
+            <div class="button-row" style="margin-top: 11px">
+              <button class="action-button action-button--cyan" id="dispatchButton" type="button" disabled>等待托管工作流</button>
+              <button class="action-button" id="sealButton" type="button" disabled>封存工作区</button>
+              <button class="action-button action-button--danger" id="deleteButton" type="button" disabled>删除终态工作区</button>
+            </div>
+          </form>
+
+          <div class="control-readout" aria-label="工作区六项身份读数">
+            <div class="readout-cell">
+              <span class="readout-label">Business date</span>
+              <span class="readout-value" id="workspaceDate">—</span>
+            </div>
+            <div class="readout-cell">
+              <span class="readout-label">Run ID</span>
+              <span class="readout-value" id="workspaceRunId">—</span>
+            </div>
+            <div class="readout-cell">
+              <span class="readout-label">Incarnation ID</span>
+              <span class="readout-value" id="workspaceIncarnation">—</span>
+            </div>
+            <div class="readout-cell">
+              <span class="readout-label">Workspace status</span>
+              <span class="readout-value status-value" id="workspaceStatus" data-tone="neutral">未创建</span>
+            </div>
+            <div class="readout-cell">
+              <span class="readout-label">Bound release</span>
+              <span class="readout-value" id="workspaceRelease">—</span>
+            </div>
+            <div class="readout-cell">
+              <span class="readout-label">Workspace contract</span>
+              <span class="readout-value" id="workspaceVersion">—</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="notice" id="notice" data-tone="info" role="status" aria-live="polite" hidden>
+        <span class="notice__code" id="noticeCode">INFO</span>
+        <div>
+          <strong class="notice__title" id="noticeTitle"></strong>
+          <p class="notice__detail" id="noticeDetail"></p>
+          <p class="notice__hint" id="noticeHint"></p>
+        </div>
+        <button class="notice__close" id="noticeClose" type="button" aria-label="关闭提示">×</button>
+      </section>
+
+      <section class="panel panel--ink" aria-labelledby="bindingHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">02</span>
+          <h2 id="bindingHeading">Dolphin 发布绑定账本</h2>
+          <p>REGISTERED CONFIG ≡ IMMUTABLE RUN BINDING</p>
+        </div>
+        <dl class="binding-grid">
+          <div class="binding-item"><dt>Platform</dt><dd id="bindingPlatform">—</dd></div>
+          <div class="binding-item"><dt>Application ID</dt><dd id="bindingApplication">—</dd></div>
+          <div class="binding-item"><dt>Release version</dt><dd id="bindingRelease">—</dd></div>
+          <div class="binding-item"><dt>Workflow version</dt><dd id="bindingWorkflow">—</dd></div>
+          <div class="binding-item binding-item--wide"><dt>Skill bundle SHA-256</dt><dd id="bindingSkillSha">—</dd></div>
+          <div class="binding-item binding-item--wide"><dt>Schema bundle SHA-256</dt><dd id="bindingSchemaSha">—</dd></div>
+          <div class="binding-item binding-item--wide"><dt>Platform release SHA-256 / workspace binding</dt><dd id="bindingReleaseSha">—</dd></div>
+          <div class="binding-item binding-item--wide"><dt>Bound at</dt><dd id="bindingBoundAt">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel" aria-labelledby="stagesHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">03</span>
+          <h2 id="stagesHeading">Stage 0—5 运行轨道</h2>
+          <p>DETERMINISTIC GATES / AGENT OUTPUTS</p>
+        </div>
+        <div class="track-header">
+          <div class="track-meter" role="progressbar" id="stageProgress" aria-label="已完成阶段" aria-valuemin="0" aria-valuemax="6" aria-valuenow="0">
+            <div class="track-meter__fill"></div>
+          </div>
+          <span class="track-count" id="stageCount">0 / 6</span>
+        </div>
+        <ol class="stage-track" id="stageTrack">
+          <li class="stage-node" data-stage="0" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 00</span><span class="stage-name">数据运营</span><span class="stage-status">pending</span></div></li>
+          <li class="stage-node" data-stage="1" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 01</span><span class="stage-name">异常巡检</span><span class="stage-status">pending</span></div></li>
+          <li class="stage-node" data-stage="2" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 02</span><span class="stage-name">竞争诊断</span><span class="stage-status">pending</span></div></li>
+          <li class="stage-node" data-stage="3" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 03</span><span class="stage-name">行动建议</span><span class="stage-status">pending</span></div></li>
+          <li class="stage-node" data-stage="4" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 04</span><span class="stage-name">逻辑审核</span><span class="stage-status">pending</span></div></li>
+          <li class="stage-node" data-stage="5" data-tone="neutral"><div class="stage-node__body"><span class="stage-index">STAGE 05</span><span class="stage-name">日报交付</span><span class="stage-status">pending</span></div></li>
+        </ol>
+      </section>
+
+      <section class="panel panel--ink" aria-labelledby="snapshotHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">04</span>
+          <h2 id="snapshotHeading">业务安全投影</h2>
+          <p>UI SNAPSHOT / HASH-VERIFIED ARTIFACT</p>
+        </div>
+        <div class="empty-ledger" id="snapshotEmpty">Stage 5 终审生成 orchestrator_ui_snapshot 后，本页才读取业务安全投影；不会读取 raw response 或证据正文。</div>
+        <div id="snapshotContent" hidden>
+          <div class="snapshot-grid">
+            <div class="snapshot-score"><strong id="snapshotScore">—</strong><span id="snapshotBand">health score</span></div>
+            <div class="snapshot-copy">
+              <h3 id="snapshotHeadline">—</h3>
+              <p id="snapshotSummary">—</p>
+              <p style="margin-top:10px"><strong>决策瓶颈：</strong><span id="snapshotBottleneck">—</span></p>
+            </div>
+          </div>
+          <div class="snapshot-columns">
+            <div class="snapshot-column"><h3>管理优先级</h3><ol class="snapshot-list" id="snapshotPriorities"></ol></div>
+            <div class="snapshot-column"><h3>关键异常</h3><ul class="snapshot-list" id="snapshotAnomalies"></ul></div>
+            <div class="snapshot-column"><h3>经审核建议</h3><ul class="snapshot-list" id="snapshotActions"></ul></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="artifactsHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">05</span>
+          <h2 id="artifactsHeading">Artifact 哈希清单</h2>
+          <p>CONTRACT ID ONLY / NO SERVER PATHS</p>
+        </div>
+        <div class="artifact-summary">
+          <span id="artifactCount">0 项受控产物</span>
+          <span id="artifactIntegrity">等待工作区投影</span>
+        </div>
+        <div class="empty-ledger" id="artifactEmpty">工作区返回受控 artifact 清单后，将在此列出合同 ID 与 SHA-256。</div>
+        <div class="table-wrap" id="artifactTableWrap" hidden>
+          <table>
+            <caption class="sr-only">工作区受控产物及哈希清单</caption>
+            <colgroup><col style="width:34%"><col style="width:14%"><col style="width:38%"><col style="width:14%"></colgroup>
+            <thead><tr><th scope="col">Artifact ID</th><th scope="col">Stage / Kind</th><th scope="col">SHA-256</th><th scope="col">Bytes / State</th></tr></thead>
+            <tbody id="artifactRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="journalHeading">
+        <div class="section-kicker">
+          <span class="section-kicker__number" aria-hidden="true">06</span>
+          <h2 id="journalHeading">本页操作回执</h2>
+          <p>LOCAL VIEW / SERVER REMAINS AUTHORITATIVE</p>
+        </div>
+        <ol class="journal-list" id="journalList" aria-live="polite"></ol>
+      </section>
+
+      <div class="safety-band" aria-label="安全边界">
+        <div>浏览器不持有 Dolphin / 钉钉凭据</div>
+        <div>后续操作绑定 INCARNATION + RELEASE SHA</div>
+        <div>API 仅接受合同内 ARTIFACT ID</div>
+      </div>
+    </main>
+
+    <footer>
+      <span>HUABAO NEW ENERGY · HEALTH INSPECTION CONTROL LEDGER</span>
+      <span id="footerClock">Asia/Shanghai · --:--:--</span>
+    </footer>
+  </div>
+
+  <dialog id="deleteDialog" aria-labelledby="deleteTitle" aria-describedby="deleteDescription">
+    <div class="dialog-head">
+      <h2 id="deleteTitle">二次确认：删除终态工作区</h2>
+      <button class="dialog-close" id="deleteDialogClose" type="button" aria-label="关闭删除确认">×</button>
+    </div>
+    <div class="dialog-body">
+      <p id="deleteDescription">该操作将请求服务器执行完整级联删除。只有 sealed 或 error 状态可提交，服务器仍会检查 worktree、分支、归档、SQLite 和残留。</p>
+      <p class="delete-target" id="deleteTarget">—</p>
+      <label class="field-label" for="deleteChallenge" style="margin-top:18px">输入完整 Run ID 以确认</label>
+      <input class="date-control" id="deleteChallenge" type="text" autocomplete="off" spellcheck="false">
+      <div class="dialog-actions">
+        <button class="action-button" id="deleteCancel" type="button">取消</button>
+        <button class="action-button action-button--danger" id="deleteConfirm" type="button" disabled>确认级联删除</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const API = Object.freeze({
+        config: "/api/config",
+        workspaces: "/api/workspaces"
+      });
+
+      const SESSION_KEY = "huabao.health-inspection.workspace-binding.v1";
+      const SUCCESS_STATES = new Set(["completed", "complete", "succeeded", "success", "promoted", "sealed"]);
+      const ACTIVE_STATES = new Set(["running", "active", "in_progress", "processing", "dispatched", "validating", "sealing"]);
+      const WARNING_STATES = new Set(["queued", "pending", "waiting", "retrying", "blocked", "human_takeover"]);
+      const ERROR_STATES = new Set(["failed", "error", "rejected", "cancelled", "terminated"]);
+      const DELETE_ALLOWED_STATES = new Set(["sealed", "error", "failed"]);
+
+      const STAGES = Object.freeze([
+        { index: 0, keys: ["00-data-layer", "00_data_layer", "00-data-operator", "data_operator", "stage_0", "stage0", "0"] },
+        { index: 1, keys: ["01-inspector", "01_inspector", "inspector", "stage_1", "stage1", "1"] },
+        { index: 2, keys: ["02-diagnostician", "02_diagnostician", "diagnostician", "stage_2", "stage2", "2"] },
+        { index: 3, keys: ["03-advisor", "03_advisor", "advisor", "stage_3", "stage3", "3"] },
+        { index: 4, keys: ["04-auditor", "04_auditor", "auditor", "stage_4", "stage4", "4"] },
+        { index: 5, keys: ["05-reporter", "05_reporter", "reporter", "stage_5", "stage5", "5"] }
+      ]);
+
+      const elements = Object.freeze({
+        connectionLamp: document.getElementById("connectionLamp"),
+        connectionLabel: document.getElementById("connectionLabel"),
+        releaseValue: document.getElementById("registeredReleaseValue"),
+        registeredApplication: document.getElementById("registeredApplication"),
+        releaseStamp: document.getElementById("releaseStamp"),
+        form: document.getElementById("workspaceForm"),
+        date: document.getElementById("businessDate"),
+        create: document.getElementById("createButton"),
+        refresh: document.getElementById("refreshButton"),
+        dispatch: document.getElementById("dispatchButton"),
+        seal: document.getElementById("sealButton"),
+        remove: document.getElementById("deleteButton"),
+        workflowReadout: document.getElementById("workflowReadout"),
+        workflowMode: document.getElementById("workflowMode"),
+        notice: document.getElementById("notice"),
+        noticeCode: document.getElementById("noticeCode"),
+        noticeTitle: document.getElementById("noticeTitle"),
+        noticeDetail: document.getElementById("noticeDetail"),
+        noticeHint: document.getElementById("noticeHint"),
+        noticeClose: document.getElementById("noticeClose"),
+        artifactRows: document.getElementById("artifactRows"),
+        artifactEmpty: document.getElementById("artifactEmpty"),
+        artifactTableWrap: document.getElementById("artifactTableWrap"),
+        artifactCount: document.getElementById("artifactCount"),
+        artifactIntegrity: document.getElementById("artifactIntegrity"),
+        snapshotEmpty: document.getElementById("snapshotEmpty"),
+        snapshotContent: document.getElementById("snapshotContent"),
+        snapshotPriorities: document.getElementById("snapshotPriorities"),
+        snapshotAnomalies: document.getElementById("snapshotAnomalies"),
+        snapshotActions: document.getElementById("snapshotActions"),
+        stageProgress: document.getElementById("stageProgress"),
+        stageCount: document.getElementById("stageCount"),
+        journal: document.getElementById("journalList"),
+        footerClock: document.getElementById("footerClock"),
+        deleteDialog: document.getElementById("deleteDialog"),
+        deleteDialogClose: document.getElementById("deleteDialogClose"),
+        deleteCancel: document.getElementById("deleteCancel"),
+        deleteConfirm: document.getElementById("deleteConfirm"),
+        deleteChallenge: document.getElementById("deleteChallenge"),
+        deleteTarget: document.getElementById("deleteTarget")
+      });
+
+      const state = {
+        config: null,
+        release: null,
+        workspace: restoreBinding(),
+        uiSnapshot: null,
+        busy: null
+      };
+
+      class ApiError extends Error {
+        constructor(status, payload, fallback) {
+          super(fallback || "Workspace API 请求失败");
+          this.name = "ApiError";
+          this.status = status;
+          this.payload = payload;
+        }
+      }
+
+      function setText(id, value) {
+        const node = document.getElementById(id);
+        if (node) node.textContent = displayValue(value);
+      }
+
+      function displayValue(value) {
+        if (value === null || value === undefined || value === "") return "—";
+        if (typeof value === "boolean") return value ? "yes" : "no";
+        return String(value);
+      }
+
+      function normalizeStatus(value) {
+        return String(value || "pending").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      }
+
+      function statusTone(value) {
+        const normalized = normalizeStatus(value);
+        if (SUCCESS_STATES.has(normalized)) return "success";
+        if (ACTIVE_STATES.has(normalized)) return "active";
+        if (ERROR_STATES.has(normalized)) return "error";
+        if (WARNING_STATES.has(normalized)) return "warning";
+        return "neutral";
+      }
+
+      function shanghaiNowParts() {
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Shanghai",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false
+        });
+        return Object.fromEntries(formatter.formatToParts(new Date()).map(part => [part.type, part.value]));
+      }
+
+      function shanghaiDate() {
+        const part = shanghaiNowParts();
+        return `${part.year}-${part.month}-${part.day}`;
+      }
+
+      function validBusinessDate(value) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const [year, month, day] = value.split("-").map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+      }
+
+      function formatClock() {
+        const part = shanghaiNowParts();
+        elements.footerClock.textContent = `Asia/Shanghai · ${part.year}-${part.month}-${part.day} ${part.hour}:${part.minute}:${part.second}`;
+      }
+
+      function releaseFromConfig(config) {
+        if (!config || typeof config !== "object") return null;
+        const candidate = config.platform_release || config.registered_platform_release || config.registered_release;
+        if (candidate && typeof candidate === "object") return candidate;
+        if (Array.isArray(config.releases) && config.releases.length > 0) {
+          const first = config.releases[0];
+          return first && typeof first === "object" ? first : null;
+        }
+        return null;
+      }
+
+      function releaseId(release) {
+        if (!release) return "";
+        return String(release.release_id || release.release_version || release.id || "").trim();
+      }
+
+      function workspaceEnvelope(payload) {
+        if (payload && typeof payload.workspace === "object" && payload.workspace !== null) return payload.workspace;
+        return payload && typeof payload === "object" ? payload : {};
+      }
+
+      function mergeWorkspace(payload) {
+        const incoming = workspaceEnvelope(payload);
+        const previous = state.workspace && typeof state.workspace === "object" ? state.workspace : {};
+        for (const field of ["run_id", "incarnation_id", "platform_release_sha256"]) {
+          if (previous[field] && incoming[field] && previous[field] !== incoming[field]) {
+            throw new Error(`工作区绑定漂移：${field} 与当前会话不一致。`);
+          }
+        }
+        state.workspace = Object.assign({}, previous, incoming);
+        persistBinding();
+        renderWorkspace();
+      }
+
+      function restoreBinding() {
+        try {
+          const raw = sessionStorage.getItem(SESSION_KEY);
+          const parsed = raw ? JSON.parse(raw) : null;
+          if (!parsed || typeof parsed !== "object") return null;
+          if (!parsed.run_id || !parsed.incarnation_id || !parsed.platform_release_sha256) return null;
+          return parsed;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function persistBinding() {
+        if (!state.workspace) {
+          sessionStorage.removeItem(SESSION_KEY);
+          return;
+        }
+        const compact = {
+          run_id: state.workspace.run_id,
+          business_date: state.workspace.business_date,
+          incarnation_id: state.workspace.incarnation_id,
+          platform_release_sha256: state.workspace.platform_release_sha256,
+          status: state.workspace.status,
+          workspace_version: state.workspace.workspace_version,
+          platform_release: state.workspace.platform_release
+        };
+        try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(compact)); } catch (_) { /* session persistence is optional */ }
+      }
+
+      function bindingHeaders() {
+        const workspace = state.workspace || {};
+        const incarnation = String(workspace.incarnation_id || "").trim();
+        const releaseSha = String(workspace.platform_release_sha256 || "").trim();
+        if (!incarnation || !releaseSha) {
+          throw new Error("当前标签页没有完整的 incarnation 与 release SHA 绑定，请先创建工作区。");
+        }
+        return {
+          "X-Workspace-Incarnation": incarnation,
+          "X-Platform-Release-SHA256": releaseSha
+        };
+      }
+
+      async function request(path, options = {}) {
+        const headers = Object.assign({ Accept: "application/json" }, options.headers || {});
+        const response = await fetch(path, Object.assign({
+          credentials: "same-origin",
+          cache: "no-store"
+        }, options, { headers }));
+        const raw = await response.text();
+        let payload = null;
+        if (raw) {
+          try { payload = JSON.parse(raw); } catch (_) { payload = { message: raw }; }
+        }
+        if (!response.ok) {
+          throw new ApiError(response.status, payload, `${response.status} ${response.statusText}`.trim());
+        }
+        return payload || {};
+      }
+
+      function serverMessage(error) {
+        const payload = error && error.payload;
+        if (typeof payload === "string") return payload;
+        if (payload && typeof payload === "object") {
+          const direct = payload.message || payload.detail || payload.error_description;
+          if (typeof direct === "string") return direct;
+          if (payload.error && typeof payload.error === "string") return payload.error;
+          if (payload.error && typeof payload.error.message === "string") return payload.error.message;
+          if (typeof payload.code === "string") return payload.code;
+        }
+        return error && error.message ? error.message : "请求未完成。";
+      }
+
+      function showNotice(tone, code, title, detail, hint) {
+        elements.notice.dataset.tone = tone;
+        elements.noticeCode.textContent = displayValue(code);
+        elements.noticeTitle.textContent = displayValue(title);
+        elements.noticeDetail.textContent = displayValue(detail);
+        elements.noticeHint.textContent = hint ? String(hint) : "";
+        elements.noticeHint.hidden = !hint;
+        elements.notice.hidden = false;
+      }
+
+      function handleError(error, actionLabel) {
+        const status = error instanceof ApiError ? error.status : 0;
+        let title = `${actionLabel}失败`;
+        let hint = "请核对服务器状态与工作区绑定后重试。";
+        if (status === 409) {
+          title = "409 · 工作区身份或状态冲突";
+          hint = "同一业务日期只允许一个工作区；也可能是状态已推进或绑定已变化。请刷新权威状态，不要重复创建或覆盖。";
+        } else if (status === 401 || status === 403) {
+          title = `${status} · 请求未通过安全边界`;
+          hint = "浏览器不会补充任何密钥。请由可信服务器修复授权或发布绑定。";
+        } else if (status === 404) {
+          title = "404 · 未找到工作区或受控入口";
+          hint = "确认当前标签页仍持有该运行的绑定，或先创建当日工作区。";
+        } else if (status === 0) {
+          title = `${actionLabel}未连接到服务器`;
+          hint = "检查 Worktree Server 是否正在当前来源提供服务。";
+        }
+        showNotice("error", status || "NET", title, serverMessage(error), hint);
+        appendJournal("REJECT", `${title}：${serverMessage(error)}`, "error");
+      }
+
+      function appendJournal(kind, message, tone = "info") {
+        const item = document.createElement("li");
+        item.className = "journal-item";
+        item.dataset.tone = tone;
+        const part = shanghaiNowParts();
+        const time = document.createElement("time");
+        time.className = "journal-time";
+        time.textContent = `${part.hour}:${part.minute}:${part.second}`;
+        const tag = document.createElement("span");
+        tag.className = "journal-kind";
+        tag.textContent = kind;
+        const copy = document.createElement("span");
+        copy.textContent = String(message);
+        item.append(time, tag, copy);
+        elements.journal.prepend(item);
+        while (elements.journal.children.length > 8) elements.journal.lastElementChild.remove();
+      }
+
+      function setBusy(action) {
+        state.busy = action;
+        elements.connectionLamp.dataset.tone = action ? "busy" : (state.release ? "ready" : "error");
+        elements.connectionLabel.textContent = action ? `${action}处理中` : (state.release ? "Workspace API 已连接" : "受信配置不可用");
+        renderActions();
+      }
+
+      function renderConfig() {
+        const release = state.release;
+        const id = releaseId(release);
+        if (!release || !id) {
+          elements.releaseValue.textContent = "未注册发布";
+          elements.registeredApplication.textContent = "配置拒绝";
+          elements.releaseStamp.textContent = "UNAVAILABLE";
+          elements.releaseStamp.dataset.tone = "error";
+        } else {
+          elements.releaseValue.textContent = id;
+          elements.registeredApplication.textContent = displayValue(release.application_id);
+          elements.releaseStamp.textContent = "REGISTERED";
+          elements.releaseStamp.dataset.tone = "ready";
+        }
+
+        const dispatchUrl = state.config && state.config.dolphin_dispatch_url;
+        if (dispatchUrl) {
+          elements.workflowReadout.dataset.mode = "ready";
+          elements.workflowMode.textContent = "托管工作流入口已由可信服务器配置；浏览器只发送运行身份，不持有平台密钥。";
+          elements.dispatch.textContent = "派发 Dolphin 工作流";
+        } else {
+          elements.workflowReadout.dataset.mode = "waiting";
+          elements.workflowMode.textContent = "等待托管工作流";
+          elements.dispatch.textContent = "等待托管工作流";
+        }
+
+        renderBinding();
+        renderActions();
+      }
+
+      function boundRelease() {
+        const workspace = state.workspace || {};
+        if (workspace.platform_release && typeof workspace.platform_release === "object") return workspace.platform_release;
+        return state.release || {};
+      }
+
+      function renderBinding() {
+        const release = boundRelease();
+        const workspace = state.workspace || {};
+        setText("bindingPlatform", release.platform);
+        setText("bindingApplication", release.application_id);
+        setText("bindingRelease", release.release_version || release.release_id || release.id);
+        setText("bindingWorkflow", release.workflow_version);
+        setText("bindingSkillSha", release.skill_bundle_sha256);
+        setText("bindingSchemaSha", release.schema_bundle_sha256);
+        setText("bindingReleaseSha", workspace.platform_release_sha256 || release.platform_release_sha256 || release.sha256);
+        setText("bindingBoundAt", release.bound_at || workspace.bound_at);
+      }
+
+      function renderWorkspace() {
+        const workspace = state.workspace;
+        if (!workspace) {
+          setText("workspaceDate", null);
+          setText("workspaceRunId", null);
+          setText("workspaceIncarnation", null);
+          setText("workspaceStatus", "未创建");
+          setText("workspaceRelease", null);
+          setText("workspaceVersion", null);
+          document.getElementById("workspaceStatus").dataset.tone = "neutral";
+          renderStages(null);
+          renderArtifacts([]);
+          renderBinding();
+          renderActions();
+          return;
+        }
+        const release = workspace.platform_release && typeof workspace.platform_release === "object" ? workspace.platform_release : {};
+        setText("workspaceDate", workspace.business_date);
+        setText("workspaceRunId", workspace.run_id);
+        setText("workspaceIncarnation", workspace.incarnation_id);
+        setText("workspaceStatus", workspace.status || "pending");
+        document.getElementById("workspaceStatus").dataset.tone = statusTone(workspace.status);
+        setText("workspaceRelease", release.release_version || workspace.release_id || releaseId(state.release));
+        setText("workspaceVersion", workspace.workspace_version);
+        renderBinding();
+        renderStages(workspace);
+        renderArtifacts(artifactList(workspace));
+        renderActions();
+      }
+
+      function stageValue(source, stage) {
+        const statuses = source && source.stage_statuses;
+        if (Array.isArray(statuses)) {
+          const match = statuses.find(item => {
+            if (!item || typeof item !== "object") return false;
+            const marker = item.index ?? item.stage_index ?? item.stage ?? item.id ?? item.name;
+            return String(marker) === String(stage.index) || stage.keys.includes(String(marker));
+          });
+          return match && (match.status || match.state || match.result);
+        }
+        if (statuses && typeof statuses === "object") {
+          for (const key of stage.keys) {
+            if (Object.prototype.hasOwnProperty.call(statuses, key)) {
+              const value = statuses[key];
+              return value && typeof value === "object" ? (value.status || value.state || value.result) : value;
+            }
+          }
+        }
+        const stages = source && source.stages;
+        if (Array.isArray(stages)) {
+          const match = stages.find(item => item && (Number(item.index ?? item.stage_index) === stage.index || stage.keys.includes(String(item.id || item.stage || item.name || ""))));
+          return match && (match.status || match.state || match.result);
+        }
+        return "pending";
+      }
+
+      function renderStages(workspace) {
+        let complete = 0;
+        for (const stage of STAGES) {
+          const node = document.querySelector(`[data-stage="${stage.index}"]`);
+          const value = workspace ? stageValue(workspace, stage) : "pending";
+          const normalized = normalizeStatus(value);
+          const tone = statusTone(normalized);
+          node.dataset.tone = tone;
+          node.querySelector(".stage-status").textContent = normalized;
+          if (SUCCESS_STATES.has(normalized)) complete += 1;
+        }
+        elements.stageProgress.setAttribute("aria-valuenow", String(complete));
+        elements.stageProgress.style.setProperty("--track-progress", `${(complete / 6) * 100}%`);
+        elements.stageCount.textContent = `${complete} / 6`;
+      }
+
+      function artifactList(workspace) {
+        if (!workspace || typeof workspace !== "object") return [];
+        const source = Array.isArray(workspace.artifacts)
+          ? workspace.artifacts
+          : (workspace.artifact_manifest && Array.isArray(workspace.artifact_manifest.artifacts)
+              ? workspace.artifact_manifest.artifacts
+              : workspace.artifacts);
+        if (Array.isArray(source)) return source.filter(item => item && typeof item === "object");
+        if (source && typeof source === "object") {
+          return Object.entries(source).map(([artifactId, value]) => {
+            if (value && typeof value === "object") return Object.assign({ artifact_id: artifactId }, value);
+            return { artifact_id: artifactId, sha256: value };
+          });
+        }
+        return [];
+      }
+
+      function artifactField(artifact, names) {
+        for (const name of names) {
+          if (artifact[name] !== undefined && artifact[name] !== null && artifact[name] !== "") return artifact[name];
+        }
+        return null;
+      }
+
+      function renderArtifacts(artifacts) {
+        elements.artifactRows.replaceChildren();
+        elements.artifactCount.textContent = `${artifacts.length} 项受控产物`;
+        elements.artifactIntegrity.textContent = artifacts.length ? "哈希由 Workspace API 权威投影" : "等待工作区投影";
+        elements.artifactEmpty.hidden = artifacts.length > 0;
+        elements.artifactTableWrap.hidden = artifacts.length === 0;
+        for (const artifact of artifacts) {
+          const row = document.createElement("tr");
+          const id = document.createElement("td");
+          id.className = "artifact-id";
+          id.textContent = displayValue(artifactField(artifact, ["artifact_id", "id", "contract_id"]));
+          const stage = document.createElement("td");
+          stage.textContent = displayValue(artifactField(artifact, ["stage", "kind", "category", "area"]));
+          const sha = document.createElement("td");
+          sha.className = "hash-cell";
+          sha.textContent = displayValue(artifactField(artifact, ["sha256", "artifact_sha256", "hash", "digest"]));
+          const size = document.createElement("td");
+          const sizeValue = artifactField(artifact, ["size_bytes", "bytes", "size"]);
+          const stateValue = artifactField(artifact, ["state", "status", "immutable"]);
+          const sizeCopy = sizeValue === null ? "—" : `${sizeValue} B`;
+          size.textContent = stateValue === null ? sizeCopy : `${sizeCopy} / ${displayValue(stateValue)}`;
+          row.append(id, stage, sha, size);
+          elements.artifactRows.append(row);
+        }
+      }
+
+      function snapshotItemText(item) {
+        if (typeof item === "string") return item;
+        if (!item || typeof item !== "object") return displayValue(item);
+        return displayValue(item.title || item.summary || item.decision_needed || item.anomaly_id || item.action_id);
+      }
+
+      function renderSnapshotList(node, values) {
+        node.replaceChildren();
+        const items = Array.isArray(values) ? values.slice(0, 5) : [];
+        if (!items.length) {
+          const empty = document.createElement("li");
+          empty.textContent = "本期无条目";
+          node.append(empty);
+          return;
+        }
+        for (const value of items) {
+          const item = document.createElement("li");
+          item.textContent = snapshotItemText(value);
+          node.append(item);
+        }
+      }
+
+      function renderSnapshot() {
+        const snapshot = state.uiSnapshot;
+        const visible = Boolean(snapshot && typeof snapshot === "object");
+        elements.snapshotEmpty.hidden = visible;
+        elements.snapshotContent.hidden = !visible;
+        if (!visible) return;
+        const assessment = snapshot.health_assessment && typeof snapshot.health_assessment === "object"
+          ? snapshot.health_assessment
+          : {};
+        setText("snapshotScore", snapshot.health_score);
+        setText("snapshotBand", assessment.rated_band || assessment.band || "health score");
+        setText("snapshotHeadline", snapshot.headline);
+        setText("snapshotSummary", snapshot.executive_summary);
+        setText("snapshotBottleneck", snapshot.decision_bottleneck);
+        renderSnapshotList(elements.snapshotPriorities, snapshot.management_priorities);
+        renderSnapshotList(elements.snapshotAnomalies, snapshot.key_anomalies);
+        renderSnapshotList(elements.snapshotActions, snapshot.recommended_actions);
+      }
+
+      async function loadUiSnapshot() {
+        const workspace = state.workspace;
+        if (!workspace || !workspace.run_id) {
+          state.uiSnapshot = null;
+          renderSnapshot();
+          return;
+        }
+        const metadata = artifactList(workspace).find(item => {
+          const id = artifactField(item, ["artifact_id", "id", "contract_id"]);
+          return id === "orchestrator_ui_snapshot";
+        });
+        if (!metadata) {
+          state.uiSnapshot = null;
+          renderSnapshot();
+          return;
+        }
+        const snapshot = await request(`${API.workspaces}/${encodeURIComponent(workspace.run_id)}/artifacts/orchestrator_ui_snapshot`, {
+          headers: bindingHeaders()
+        });
+        if (!snapshot || snapshot.run_id !== workspace.run_id || snapshot.business_date !== workspace.business_date || snapshot.platform_release_sha256 !== workspace.platform_release_sha256) {
+          throw new Error("ui snapshot 与当前工作区绑定不一致。");
+        }
+        state.uiSnapshot = snapshot;
+        renderSnapshot();
+      }
+
+      function renderActions() {
+        const busy = Boolean(state.busy);
+        const hasRelease = Boolean(releaseId(state.release));
+        const workspace = state.workspace;
+        const hasBinding = Boolean(workspace && workspace.run_id && workspace.incarnation_id && workspace.platform_release_sha256);
+        const status = normalizeStatus(workspace && workspace.status);
+        const dispatchConfigured = Boolean(state.config && state.config.dolphin_dispatch_url);
+        const hasDeliveryManifest = artifactList(workspace).some(item => artifactField(item, ["artifact_id", "id", "contract_id"]) === "orchestrator_delivery_manifest");
+        elements.create.disabled = busy || !hasRelease;
+        elements.refresh.disabled = busy || !hasBinding;
+        elements.dispatch.disabled = busy || !hasBinding || !dispatchConfigured || DELETE_ALLOWED_STATES.has(status);
+        elements.seal.disabled = busy || !hasBinding || !hasDeliveryManifest || DELETE_ALLOWED_STATES.has(status);
+        elements.remove.disabled = busy || !hasBinding || !DELETE_ALLOWED_STATES.has(status);
+        for (const button of [elements.create, elements.refresh, elements.dispatch, elements.seal, elements.remove]) {
+          button.setAttribute("aria-busy", busy ? "true" : "false");
+        }
+      }
+
+      function validateDateOrReport() {
+        const value = elements.date.value;
+        if (validBusinessDate(value)) return value;
+        showNotice("error", "DATE", "业务日期格式无效", "请输入真实存在的 YYYY-MM-DD 日期。", "日期按 Asia/Shanghai 解释。");
+        elements.date.focus();
+        return null;
+      }
+
+      async function loadConfig() {
+        setBusy("CONFIG");
+        try {
+          state.config = await request(API.config);
+          state.release = releaseFromConfig(state.config);
+          if (!releaseId(state.release)) throw new Error("GET /api/config 未返回有效的 registered platform_release。");
+          renderConfig();
+          appendJournal("CONFIG", `已登记 Dolphin 发布 ${releaseId(state.release)}`, "success");
+          if (state.workspace) {
+            if (state.workspace.business_date) elements.date.value = state.workspace.business_date;
+            await refreshWorkspace(true);
+          }
+        } catch (error) {
+          state.release = null;
+          renderConfig();
+          handleError(error, "读取受信配置");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      async function createWorkspace(event) {
+        event.preventDefault();
+        const businessDate = validateDateOrReport();
+        if (!businessDate) return;
+        const registeredRelease = releaseId(state.release);
+        if (!registeredRelease) {
+          showNotice("error", "CONFIG", "未注册 Dolphin 发布", "服务器配置未提供可用 release ID。", "工作区不会在缺失发布绑定时创建。");
+          return;
+        }
+        setBusy("CREATE");
+        try {
+          const payload = await request(API.workspaces, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ business_date: businessDate, release_id: registeredRelease })
+          });
+          state.workspace = null;
+          state.uiSnapshot = null;
+          mergeWorkspace(payload);
+          renderSnapshot();
+          showNotice("success", "201", "工作区已创建并绑定", displayValue(state.workspace.run_id), "后续请求将同时携带 incarnation 与 platform release SHA-256。");
+          appendJournal("CREATE", `${state.workspace.run_id} / ${state.workspace.status || "pending"}`, "success");
+        } catch (error) {
+          handleError(error, "创建工作区");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      async function refreshWorkspace(silent = false) {
+        if (!state.workspace || !state.workspace.run_id) {
+          if (!silent) showNotice("warning", "BIND", "没有可刷新的工作区绑定", "请先创建当日工作区。", "GET 请求同样绑定 incarnation 与 release SHA-256。");
+          return;
+        }
+        setBusy("REFRESH");
+        try {
+          const payload = await request(`${API.workspaces}/${encodeURIComponent(state.workspace.run_id)}`, {
+            headers: bindingHeaders()
+          });
+          mergeWorkspace(payload);
+          await loadUiSnapshot();
+          if (!silent) showNotice("info", "200", "权威状态已刷新", `${displayValue(state.workspace.run_id)} · ${displayValue(state.workspace.status)}`, "界面已重新投影阶段状态和 artifact 哈希清单。");
+          appendJournal("REFRESH", `${state.workspace.run_id} / ${state.workspace.status || "pending"}`, "success");
+        } catch (error) {
+          handleError(error, "刷新工作区");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      function trustedDispatchEndpoint() {
+        const raw = state.config && state.config.dolphin_dispatch_url;
+        if (!raw || typeof raw !== "string") throw new Error("等待托管工作流：服务器尚未配置 dispatch 入口。");
+        const runId = encodeURIComponent(state.workspace.run_id);
+        const expanded = raw.replaceAll("{run_id}", runId);
+        const resolved = new URL(expanded, window.location.origin);
+        if (resolved.origin !== window.location.origin) {
+          throw new Error("Dolphin dispatch 必须由同源可信服务器代理，浏览器拒绝跨源入口。");
+        }
+        return `${resolved.pathname}${resolved.search}`;
+      }
+
+      async function dispatchWorkflow() {
+        setBusy("DISPATCH");
+        try {
+          const endpoint = trustedDispatchEndpoint();
+          const payload = await request(endpoint, {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, bindingHeaders()),
+            body: JSON.stringify({ run_id: state.workspace.run_id })
+          });
+          if (payload && (payload.workspace || payload.run_id)) mergeWorkspace(payload);
+          showNotice("success", "202", "托管工作流已派发", displayValue(state.workspace.run_id), "Dolphin 鉴权保留在可信服务器；浏览器未接触任何平台密钥。");
+          appendJournal("DISPATCH", `${state.workspace.run_id} 已提交可信转发入口`, "success");
+        } catch (error) {
+          handleError(error, "派发 Dolphin 工作流");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      async function sealWorkspace() {
+        const manifest = artifactList(state.workspace).find(item => {
+          const id = artifactField(item, ["artifact_id", "id", "contract_id"]);
+          return id === "orchestrator_delivery_manifest";
+        });
+        const manifestSha = manifest && artifactField(manifest, ["sha256", "artifact_sha256", "hash", "digest"]);
+        if (!/^[0-9a-f]{64}$/.test(String(manifestSha || ""))) {
+          showNotice("warning", "MANIFEST", "日报尚未具备封存清单", "请先完成 Dolphin Stage 0–5 与终审。", "seal 只接受已索引 delivery manifest 的精确 SHA-256。");
+          return;
+        }
+        setBusy("SEAL");
+        try {
+          const payload = await request(`${API.workspaces}/${encodeURIComponent(state.workspace.run_id)}/seal`, {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, bindingHeaders()),
+            body: JSON.stringify({ delivery_manifest_sha256: manifestSha })
+          });
+          if (payload && Object.keys(payload).length) mergeWorkspace(payload);
+          else await refreshWorkspace(true);
+          await loadUiSnapshot();
+          showNotice("success", "SEALED", "工作区封存请求已通过", `${displayValue(state.workspace.run_id)} · ${displayValue(state.workspace.status)}`, "服务器已执行完成态校验、manifest 绑定与 checkpoint 门禁。");
+          appendJournal("SEAL", `${state.workspace.run_id} / ${state.workspace.status}`, "success");
+        } catch (error) {
+          handleError(error, "封存工作区");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      function openDeleteDialog() {
+        const workspace = state.workspace;
+        if (!workspace || !DELETE_ALLOWED_STATES.has(normalizeStatus(workspace.status))) return;
+        elements.deleteTarget.textContent = `${displayValue(workspace.run_id)} · ${displayValue(workspace.status)} · ${displayValue(workspace.incarnation_id)}`;
+        elements.deleteChallenge.value = "";
+        elements.deleteConfirm.disabled = true;
+        if (typeof elements.deleteDialog.showModal === "function") {
+          elements.deleteDialog.showModal();
+          elements.deleteChallenge.focus();
+        } else {
+          showNotice("error", "UI", "浏览器不支持安全删除确认框", "请使用支持 HTML dialog 的现代浏览器。", "为避免误删，本页不会降级为单次确认。");
+        }
+      }
+
+      function closeDeleteDialog() {
+        elements.deleteChallenge.value = "";
+        elements.deleteConfirm.disabled = true;
+        if (elements.deleteDialog.open) elements.deleteDialog.close();
+      }
+
+      async function deleteWorkspace() {
+        const workspace = state.workspace;
+        if (!workspace || elements.deleteChallenge.value !== workspace.run_id) return;
+        closeDeleteDialog();
+        setBusy("DELETE");
+        try {
+          const runId = workspace.run_id;
+          await request(`${API.workspaces}/${encodeURIComponent(runId)}`, {
+            method: "DELETE",
+            headers: bindingHeaders()
+          });
+          state.workspace = null;
+          state.uiSnapshot = null;
+          persistBinding();
+          renderWorkspace();
+          renderSnapshot();
+          showNotice("success", "DELETE", "终态工作区已级联删除", runId, "服务器已确认运行记录、进程、worktree、日期分支与运行文件无残留。");
+          appendJournal("DELETE", `${runId} 已删除`, "success");
+        } catch (error) {
+          handleError(error, "删除工作区");
+        } finally {
+          setBusy(null);
+        }
+      }
+
+      elements.form.addEventListener("submit", createWorkspace);
+      elements.refresh.addEventListener("click", () => refreshWorkspace(false));
+      elements.dispatch.addEventListener("click", dispatchWorkflow);
+      elements.seal.addEventListener("click", sealWorkspace);
+      elements.remove.addEventListener("click", openDeleteDialog);
+      elements.noticeClose.addEventListener("click", () => { elements.notice.hidden = true; });
+      elements.deleteDialogClose.addEventListener("click", closeDeleteDialog);
+      elements.deleteCancel.addEventListener("click", closeDeleteDialog);
+      elements.deleteChallenge.addEventListener("input", () => {
+        const expected = state.workspace && state.workspace.run_id;
+        elements.deleteConfirm.disabled = !expected || elements.deleteChallenge.value !== expected;
+      });
+      elements.deleteConfirm.addEventListener("click", deleteWorkspace);
+      elements.deleteDialog.addEventListener("click", event => {
+        if (event.target === elements.deleteDialog) closeDeleteDialog();
+      });
+
+      const queryDate = new URL(window.location.href).searchParams.get("date");
+      elements.date.value = validBusinessDate(queryDate || "") ? queryDate : (state.workspace && validBusinessDate(state.workspace.business_date || "") ? state.workspace.business_date : shanghaiDate());
+      renderWorkspace();
+      renderSnapshot();
+      formatClock();
+      window.setInterval(formatClock, 1000);
+      loadConfig();
+    })();
+  </script>
+</body>
+</html>
