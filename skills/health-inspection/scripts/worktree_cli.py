@@ -286,14 +286,28 @@ def remove_daily_worktree(
         branch=branch,
         worktree_path=worktree_path,
     )
-    if registered_worktree(root, worktree_path):
+    if worktree_path.is_symlink():
+        raise GitWorkspaceError("daily worktree path is a link; refusing deletion")
+    target = worktree_path.resolve()
+    registration = next(
+        (
+            item
+            for item in list_linked_worktrees(root)
+            if isinstance(item.get("worktree"), str)
+            and Path(str(item["worktree"])).resolve() == target
+        ),
+        None,
+    )
+    if registration is not None:
+        if registration.get("branch") != branch:
+            raise GitWorkspaceError("daily worktree registration is bound to another branch")
         run_git(root, ["worktree", "remove", "--force", str(worktree_path.resolve())])
-    elif worktree_path.exists():
+    elif os.path.lexists(worktree_path):
         raise GitWorkspaceError("unregistered daily directory remains; refusing recursive deletion")
     if branch_exists(root, branch):
         run_git(root, ["branch", "-D", "--", branch])
     run_git(root, ["worktree", "prune"])
-    if worktree_path.exists() or registered_worktree(root, worktree_path):
+    if os.path.lexists(worktree_path) or registered_worktree(root, worktree_path):
         raise GitWorkspaceError("daily worktree residue remains after deletion")
     if branch_exists(root, branch):
         raise GitWorkspaceError("daily branch residue remains after deletion")

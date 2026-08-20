@@ -1251,7 +1251,7 @@ def _run_summary(service: WorkspaceService, run: Mapping[str, Any]) -> dict[str,
         "completed_at": run.get("sealed_at"),
         "control_plane_active": bool(run.get("active")),
         "history_frozen": status == "completed",
-        "storage_type": "archive" if status == "completed" else "worktree",
+        "storage_type": "history" if status == "completed" else "worktree",
         "archive_status": "completed" if status == "completed" else "none",
         "archived": status == "completed",
         "catalog_revision": len(service.store.list_artifacts(str(run["run_id"]))),
@@ -1579,7 +1579,7 @@ def snapshot(service: WorkspaceService, run_id: str) -> dict[str, Any]:
             "stage_count": sum(stage["status"] == "completed" for stage in stages.values()),
             "source": "verified_workspace_artifact_index",
         },
-        "storage_type": "archive" if status == "completed" else "worktree",
+        "storage_type": "history" if status == "completed" else "worktree",
         "archive_status": "completed" if status == "completed" else "none",
         "snapshot_version": len(base.get("artifacts", [])),
         "catalog_revision": len(base.get("artifacts", [])),
@@ -1846,7 +1846,7 @@ def _policy_run_usage(service: WorkspaceService) -> list[dict[str, Any]]:
                 "run_id": run["run_id"],
                 "business_date": run["business_date"],
                 "status": _legacy_status(run.get("status")),
-                "storage_type": "archive" if run.get("status") == "sealed" else "worktree",
+                "storage_type": "history" if run.get("status") == "sealed" else "worktree",
                 "policy_sha256": sha256,
             }
         )
@@ -1881,7 +1881,7 @@ def _policy_documents(service: WorkspaceService) -> list[dict[str, Any]]:
             "run_id": run["run_id"],
             "business_date": run["business_date"],
             "status": _legacy_status(run.get("status")),
-            "storage_type": "archive" if run.get("status") == "sealed" else "worktree",
+            "storage_type": "history" if run.get("status") == "sealed" else "worktree",
         }
         if key not in documents:
             raw_rules = policy.get("rules", []) if policy else []

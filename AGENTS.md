@@ -34,9 +34,11 @@ or workflow scheduling decisions.
   server-owned SQLite policy store with optimistic revision checks. Version
   occupancy is an exact version-plus-SHA identity; logical deletion retains a
   hash-chained tombstone, and `next_inspection` never activates without a
-  durable runtime claim. Legacy run, retry and action-note mutations remain
-  fail closed until their trusted
-  Dolphin dispatch, cancel-ack and note contracts exist.
+  durable runtime claim. The workbench may delete a terminal `sealed` or
+  `error` daily run through a server-owned binding lookup; the response never
+  exposes that binding. Run creation, retry, action-note mutation, and
+  active-run deletion remain fail closed until their trusted Dolphin dispatch,
+  cancel-ack and note contracts exist.
 - `input`, `context`, and `result` must equal the artifact registry at seal.
   Links, undeclared files, missing files, and hash drift fail closed.
 - Seal creates server-owned workspace/archive manifests, checkpoints the daily

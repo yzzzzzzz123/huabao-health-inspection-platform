@@ -99,6 +99,7 @@ PUT /api/inspection-schedule
 POST /api/health-policy/publish
 POST /api/health-policy/versions/{version}/select
 DELETE /api/health-policy/versions/{version}
+DELETE /api/runs/{run_id}?delete_request_id={request_id}
 ```
 
 Every snapshot artifact is resolved through the registry and SQLite index,
@@ -114,9 +115,13 @@ document in a hash-chained tombstone before removing it from the active list,
 so middle-version deletion and later version-label reuse preserve ancestry.
 `next_inspection` versions remain pending until a future trusted runtime writes
 the durable queue/claim fact; wall-clock passage alone never activates them.
-Legacy run, retry and action-note mutations still return `503`
-before changing state until the trusted Dolphin Gateway, cancel acknowledgement
-and mutable note store are deployed.
+The legacy workbench delete route accepts one validated request ID and only a
+terminal `sealed`, `error`, or already `deleting` daily run. The Server resolves
+the capability binding internally under the workspace lock, performs the same
+archive/worktree/branch/SQLite cascade as the canonical API, and returns only a
+safe deletion receipt. Run creation, retry, action-note mutation, and active-run
+deletion still fail closed until the trusted Dolphin Gateway, cancel
+acknowledgement, and mutable note store are deployed.
 
 The ignored policy database is initialized explicitly; server startup never
 reads the legacy repository. A one-time migration validates the legacy Git

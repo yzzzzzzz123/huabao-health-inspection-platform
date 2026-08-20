@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 import threading
 import uuid
@@ -59,6 +60,7 @@ from worktree_cli import (  # noqa: E402
 CONTRACT_PATH = Path("skills/health-inspection/contracts/worktree-file-contract.json")
 ARTIFACT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 RUN_ID_RE = re.compile(r"^hi-(\d{4}-\d{2}-\d{2})$")
+DELETE_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 METRIC_ID_RE = re.compile(r"^HI-[0-9]{3}$")
 PLATFORM_RELEASE_KEYS = frozenset((*RELEASE_FIELDS, "bound_at"))
@@ -530,6 +532,16 @@ def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
+
+
 def _now_shanghai() -> str:
     return datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="milliseconds")
 
@@ -551,12 +563,19 @@ class WorkspaceService:
         self.config: WorkspaceRuntimeConfig = load_workspace_config(self.project_root)
         self.registry = ArtifactRegistry(self.project_root / CONTRACT_PATH)
         self.store = StateStore(self.project_root)
-        self.worktrees_root = (self.project_root / "worktrees").resolve()
-        self.history_root = (self.project_root / "history").resolve()
-        self.worktrees_root.mkdir(parents=True, exist_ok=True)
-        self.history_root.mkdir(parents=True, exist_ok=True)
+        self.worktrees_root = self._server_owned_root("worktrees")
+        self.history_root = self._server_owned_root("history")
         self._lock = threading.RLock()
         ensure_git_root(self.project_root)
+
+    def _server_owned_root(self, name: str) -> Path:
+        root = self.project_root / name
+        if os.path.lexists(root) and (_is_link_or_reparse(root) or not root.is_dir()):
+            raise WorkspaceAPIError(500, "workspace_root_unsafe", f"{name} root is unsafe")
+        root.mkdir(parents=False, exist_ok=True)
+        if _is_link_or_reparse(root) or not root.is_dir() or root.resolve() != root:
+            raise WorkspaceAPIError(500, "workspace_root_unsafe", f"{name} root is unsafe")
+        return root
 
     @contextmanager
     def admission_lock(self) -> Iterator[None]:
@@ -659,6 +678,38 @@ class WorkspaceService:
         if expected.parent != self.history_root:
             raise WorkspaceAPIError(500, "workspace_identity_corrupt", "stored archive identity is invalid")
         return expected
+
+    @staticmethod
+    def _validate_daily_delete_identity(run_id: str, run: Mapping[str, Any]) -> str:
+        match = RUN_ID_RE.fullmatch(run_id)
+        business_date = str(run.get("business_date", ""))
+        try:
+            parsed_date = date.fromisoformat(business_date)
+        except ValueError as exc:
+            raise WorkspaceAPIError(
+                500,
+                "workspace_identity_corrupt",
+                "stored daily workspace identity is invalid",
+            ) from exc
+        expected_branch = f"run/health-inspection/daily/{business_date}"
+        expected_workspace = f"worktrees/{business_date}"
+        expected_archive = f"history/{business_date}"
+        if (
+            match is None
+            or match.group(1) != business_date
+            or parsed_date.isoformat() != business_date
+            or run.get("run_id") != run_id
+            or run.get("branch_name") != expected_branch
+            or run.get("workspace_path") != expected_workspace
+            or run.get("archive_path") not in {None, expected_archive}
+            or (run.get("status") == "sealed" and run.get("archive_path") != expected_archive)
+        ):
+            raise WorkspaceAPIError(
+                500,
+                "workspace_identity_corrupt",
+                "stored daily workspace identity is invalid",
+            )
+        return business_date
 
     @staticmethod
     def _target_path(root: Path, relative_path: str) -> Path:
@@ -2014,10 +2065,12 @@ class WorkspaceService:
         *,
         incarnation_id: str,
         release_sha256: str,
+        delete_request_id: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             run = self._run_or_404(run_id)
             self._authorize(run, incarnation_id, release_sha256)
+            business_date = self._validate_daily_delete_identity(run_id, run)
             if run["status"] not in {"sealed", "error", "deleting"}:
                 raise WorkspaceAPIError(
                     409,
@@ -2050,26 +2103,34 @@ class WorkspaceService:
                         incarnation_id=current["incarnation_id"],
                         event_type="workspace_deleting",
                         occurred_at=_now_shanghai(),
-                        payload={"previous_status": current["status"]},
+                        payload={
+                            "previous_status": current["status"],
+                            **(
+                                {"delete_request_id": delete_request_id}
+                                if delete_request_id is not None
+                                else {}
+                            ),
+                        },
                     )
             run = self._run_or_404(run_id)
-            archive = self._archive_path(run)
+            archive = self.history_root / business_date
             try:
-                if archive.exists():
-                    if archive.resolve().parent != self.history_root or archive.is_symlink():
+                if os.path.lexists(archive):
+                    if archive.is_symlink() or archive.resolve().parent != self.history_root:
                         raise WorkspaceAPIError(409, "archive_residue", "archive path is unsafe")
                     shutil.rmtree(archive)
+                worktree = self.worktrees_root / business_date
+                self._workspace_path(run)
                 remove_daily_worktree(
                     self.project_root,
                     business_date=run["business_date"],
                     run_id=run_id,
                     branch=run["branch_name"],
-                    worktree_path=self._workspace_path(run),
+                    worktree_path=worktree,
                 )
-                worktree = self._workspace_path(run)
                 if (
-                    worktree.exists()
-                    or archive.exists()
+                    os.path.lexists(worktree)
+                    or os.path.lexists(archive)
                     or registered_worktree(self.project_root, worktree)
                     or branch_exists(self.project_root, run["branch_name"])
                 ):
@@ -2084,7 +2145,14 @@ class WorkspaceService:
                         incarnation_id=current["incarnation_id"],
                         event_type="workspace_deleted",
                         occurred_at=occurred_at,
-                        payload={"platform_release_sha256": current["platform_release_sha256"]},
+                        payload={
+                            "platform_release_sha256": current["platform_release_sha256"],
+                            **(
+                                {"delete_request_id": delete_request_id}
+                                if delete_request_id is not None
+                                else {}
+                            ),
+                        },
                     )
                     self.store.delete_run(connection, run_id)
                 return {
@@ -2106,6 +2174,97 @@ class WorkspaceService:
                             error_message=str(exc)[:500],
                         )
                 raise WorkspaceAPIError(500, "delete_failed", str(exc)) from exc
+
+    def delete_workspace_from_workbench(
+        self,
+        run_id: str,
+        *,
+        delete_request_id: str,
+    ) -> dict[str, Any]:
+        """Delete a terminal daily workspace without exposing its capability binding."""
+
+        match = RUN_ID_RE.fullmatch(run_id)
+        if match is None:
+            raise WorkspaceAPIError(404, "workspace_not_found", "workspace does not exist")
+        if DELETE_REQUEST_ID_RE.fullmatch(delete_request_id) is None:
+            raise WorkspaceAPIError(
+                422,
+                "invalid_delete_request_id",
+                "delete_request_id must contain 1-128 letters, digits, underscores, or hyphens",
+            )
+        with self._lock:
+            completed = next(
+                (
+                    event
+                    for event in reversed(self.store.list_events(run_id=run_id))
+                    if event["event_type"] == "workspace_deleted"
+                    and event["payload"].get("delete_request_id") == delete_request_id
+                ),
+                None,
+            )
+            current = self.store.get_run(run_id)
+            if completed is not None:
+                if current is not None:
+                    raise WorkspaceAPIError(
+                        409,
+                        "stale_delete_request",
+                        "delete_request_id belongs to an earlier workspace incarnation",
+                    )
+                business_date = str(completed["business_date"])
+                try:
+                    receipt_date = date.fromisoformat(business_date)
+                except ValueError as exc:
+                    raise WorkspaceAPIError(
+                        500,
+                        "workspace_identity_corrupt",
+                        "stored deletion receipt identity is invalid",
+                    ) from exc
+                if business_date != match.group(1) or receipt_date.isoformat() != business_date:
+                    raise WorkspaceAPIError(
+                        500,
+                        "workspace_identity_corrupt",
+                        "stored deletion receipt identity is invalid",
+                    )
+                worktree = self.worktrees_root / business_date
+                archive = self.history_root / business_date
+                branch = f"run/health-inspection/daily/{business_date}"
+                if (
+                    os.path.lexists(worktree)
+                    or os.path.lexists(archive)
+                    or registered_worktree(self.project_root, worktree)
+                    or branch_exists(self.project_root, branch)
+                ):
+                    raise WorkspaceAPIError(
+                        409,
+                        "delete_residue",
+                        "workspace deletion receipt does not match repository state",
+                    )
+                return {
+                    "deleted": True,
+                    "run_id": run_id,
+                    "business_date": business_date,
+                    "delete_request_id": delete_request_id,
+                    "deleted_at": completed["occurred_at"],
+                    "cascade_verified": True,
+                    "idempotent_replay": True,
+                }
+            if current is None:
+                raise WorkspaceAPIError(404, "workspace_not_found", "workspace does not exist")
+            response = self.delete_workspace(
+                run_id,
+                incarnation_id=str(current["incarnation_id"]),
+                release_sha256=str(current["platform_release_sha256"]),
+                delete_request_id=delete_request_id,
+            )
+            return {
+                "deleted": True,
+                "run_id": response["run_id"],
+                "business_date": response["business_date"],
+                "delete_request_id": delete_request_id,
+                "deleted_at": response["deleted_at"],
+                "cascade_verified": True,
+                "idempotent_replay": False,
+            }
 
 
 __all__ = [

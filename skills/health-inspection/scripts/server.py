@@ -64,6 +64,22 @@ POLICY_SCORING_MAX_BYTES = 128 * 1024
 POLICY_SCHEDULE_MAX_BYTES = 4 * 1024
 POLICY_PUBLISH_MAX_BYTES = 8 * 1024
 POLICY_SELECT_MAX_BYTES = 1024
+LEGACY_DELETE_ERROR_MESSAGES = {
+    "invalid_delete_request_id": "删除请求标识无效，请刷新后重试",
+    "invalid_query": "删除请求参数无效，请刷新后重试",
+    "invalid_url": "删除请求地址无效，请刷新后重试",
+    "workbench_origin_required": "删除请求必须来自当前工作台",
+    "workbench_origin_mismatch": "删除请求来源与当前工作台不一致",
+    "transfer_encoding_forbidden": "删除请求格式不受支持，请刷新后重试",
+    "request_body_forbidden": "删除请求不能携带内容，请刷新后重试",
+    "workspace_not_found": "该运行已不存在，请刷新运行记录",
+    "active_delete_forbidden": "运行仍在执行中，尚未收到安全取消确认，不能删除",
+    "active_workspace_exists": "另一运行仍占用控制锁，暂时不能删除",
+    "stale_delete_request": "该删除请求属于此前的运行实例，请刷新后重试",
+    "archive_residue": "归档路径状态异常，已停止删除",
+    "delete_residue": "删除后仍有残留，运行已保留为待清理状态",
+    "delete_failed": "级联删除失败，运行已保留为待清理状态",
+}
 
 
 class DeliveryReconciler:
@@ -258,6 +274,61 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             "legacy_write_unavailable",
             f"{resource} is read-only until the trusted Dolphin Gateway and storage contract are deployed",
         )
+
+    def _require_same_origin_workbench_request(self) -> None:
+        host_values = self.headers.get_all("Host") or []
+        origin_values = self.headers.get_all("Origin") or []
+        if len(host_values) != 1 or len(origin_values) != 1:
+            raise WorkspaceAPIError(
+                403,
+                "workbench_origin_required",
+                "destructive workbench requests require one Host and Origin header",
+            )
+        try:
+            host = urlsplit(f"//{host_values[0]}")
+            origin = urlsplit(origin_values[0])
+            bound_port = int(self.server.server_address[1])
+            host_port = host.port or (80 if origin.scheme == "http" else None)
+            origin_port = origin.port or (80 if origin.scheme == "http" else None)
+        except (TypeError, ValueError) as exc:
+            raise WorkspaceAPIError(
+                403,
+                "workbench_origin_mismatch",
+                "workbench origin is invalid",
+            ) from exc
+        host_name = (host.hostname or "").lower()
+        origin_name = (origin.hostname or "").lower()
+        if (
+            origin.scheme != "http"
+            or host.username is not None
+            or host.password is not None
+            or origin.username is not None
+            or origin.password is not None
+            or host_name not in LOOPBACK_HOSTS
+            or origin_name != host_name
+            or host_port != bound_port
+            or origin_port != bound_port
+            or host.path
+            or host.query
+            or host.fragment
+            or origin.path
+            or origin.query
+            or origin.fragment
+        ):
+            raise WorkspaceAPIError(
+                403,
+                "workbench_origin_mismatch",
+                "workbench origin does not match the loopback server",
+            )
+
+    def _send_legacy_delete_error(self, error: WorkspaceAPIError) -> None:
+        message = LEGACY_DELETE_ERROR_MESSAGES.get(
+            error.code,
+            "删除失败，请刷新运行记录后重试"
+            if error.status >= 500
+            else "当前运行不能删除，请刷新后重试",
+        )
+        self._send_json(error.status, {"error": message, "type": error.code})
 
     def _content_length(self, *, maximum: int) -> int:
         if self.headers.get("Transfer-Encoding"):
@@ -789,11 +860,27 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             )
 
     def do_DELETE(self) -> None:  # noqa: N802
+        legacy_run_delete = urlsplit(self.path).path.startswith("/api/runs/")
         try:
             segments = self._segments(allow_query=True)
             query = self._query()
             if segments[:2] == ["api", "runs"]:
-                self._legacy_write_unavailable("legacy run deletion")
+                self._require_same_origin_workbench_request()
+                if len(segments) != 3 or not RUN_ID_RE.fullmatch(segments[2]):
+                    raise WorkspaceAPIError(404, "workspace_not_found", "workspace does not exist")
+                if set(query) != {"delete_request_id"} or len(query["delete_request_id"]) != 1:
+                    raise WorkspaceAPIError(
+                        422,
+                        "invalid_delete_request_id",
+                        "exactly one delete_request_id query parameter is required",
+                    )
+                self._require_empty_body()
+                response = self.server.service.delete_workspace_from_workbench(
+                    segments[2],
+                    delete_request_id=query["delete_request_id"][0],
+                )
+                self._send_json(HTTPStatus.OK, response)
+                return
             if len(segments) == 4 and segments[:3] == [
                 "api",
                 "health-policy",
@@ -829,13 +916,22 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             )
             self._send_json(HTTPStatus.OK, response)
         except WorkspaceAPIError as exc:
-            self._send_error(exc)
+            if legacy_run_delete:
+                self._send_legacy_delete_error(exc)
+            else:
+                self._send_error(exc)
         except PolicyStoreError as exc:
             self._send_policy_error(exc)
         except Exception:
-            self._send_error(
-                WorkspaceAPIError(500, "internal_error", "Workspace Server encountered an internal error")
+            error = WorkspaceAPIError(
+                500,
+                "internal_error",
+                "Workspace Server encountered an internal error",
             )
+            if legacy_run_delete:
+                self._send_legacy_delete_error(error)
+            else:
+                self._send_error(error)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
