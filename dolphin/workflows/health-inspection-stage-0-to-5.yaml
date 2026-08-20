@@ -1,0 +1,143 @@
+schema_version: "1.0"
+kind: dolphin.workflow
+metadata:
+  id: health-inspection-stage-0-to-5
+  version: v1.0.0
+  application_id: huabao-health-inspection
+  schema_status: draft_unverified_until_platform_integration
+spec:
+  timezone: Asia/Shanghai
+  currency: CNY
+  concurrency:
+    workspace_identity: hi-{business_date}
+    resume_same_incarnation: true
+    successful_stage_overwrite: false
+    maximum_business_attempts_per_stage: 3
+  workspace:
+    protocol: workspace-api-v2
+    addressing: artifact_id_only
+    binding_headers:
+      - X-Workspace-Incarnation
+      - X-Platform-Release-SHA256
+    create:
+      method: POST
+      endpoint: /api/workspaces
+    read:
+      method: GET
+      endpoint: /api/workspaces/{run_id}/artifacts/{artifact_id}
+    create_once:
+      method: PUT
+      endpoint: /api/workspaces/{run_id}/artifacts/{artifact_id}
+      headers:
+        If-None-Match: "*"
+    seal:
+      method: POST
+      endpoint: /api/workspaces/{run_id}/seal
+  bootstrap:
+    agent: orchestrator_agent
+    required_server_inputs:
+      - platform_release
+      - run_context
+    outputs:
+      - orchestrator_daily_taskbook
+      - orchestrator_taskbook_manifest
+      - orchestrator_thread
+      - data_layer_health_policy
+  production_control_loop:
+    decision_owner: orchestrator_agent
+    required_decision_fields: [action, stage]
+    one_broker_action_per_turn: true
+    observe_required_before_next_dispatch: true
+    allowed_actions:
+      - dispatch_data_operator
+      - dispatch
+      - observe
+      - retry
+      - relaunch_agent
+      - replace_instruction
+      - finalize
+      - human_takeover
+    data_operator_hosted_declaration_required: true
+    static_stage_iteration_allowed: false
+  stage_contracts:
+    - id: data_operator
+      number: 0
+      agent: data_operator_agent
+      deterministic_commands:
+        - data_layer
+        - calculate
+        - detect
+        - validate
+      required_outputs:
+        - data_layer_source
+        - data_layer_facts
+        - data_layer_evidence_catalog
+        - data_layer_manifest
+        - data_operator_attempt_001_attempt
+        - data_operator_attempt_001_stdout
+        - data_operator_attempt_001_stderr
+    - id: inspector
+      number: 1
+      agent: inspector_agent
+      depends_on: [data_operator]
+      required_outputs:
+        - inspector_attempt_001_attempt
+        - inspector_inspection_json
+        - inspector_inspection_md
+        - inspector_intelligence
+    - id: diagnostician
+      number: 2
+      agent: diagnostician_agent
+      depends_on: [inspector]
+      required_outputs:
+        - diagnostician_attempt_001_attempt
+        - diagnostician_diagnosis_json
+        - diagnostician_diagnosis_md
+        - diagnostician_intelligence
+    - id: advisor
+      number: 3
+      agent: advisor_agent
+      depends_on: [diagnostician]
+      required_outputs:
+        - advisor_attempt_001_attempt
+        - advisor_action_plan_json
+        - advisor_action_plan_md
+        - advisor_intelligence
+    - id: auditor
+      number: 4
+      agent: auditor_agent
+      depends_on: [advisor]
+      required_outputs:
+        - auditor_attempt_001_attempt
+        - auditor_audit_json
+        - auditor_audit_md
+        - auditor_intelligence
+    - id: reporter
+      number: 5
+      agent: reporter_agent
+      depends_on: [auditor]
+      required_outputs:
+        - reporter_attempt_001_attempt
+        - reporter_daily_report_json
+        - reporter_daily_report_md
+        - reporter_intelligence
+  promotion_gate:
+    schemas: true
+    semantic_id_closure: true
+    evidence_references: true
+    self_test_must_pass: true
+    unresolved_issues_must_be_empty: true
+  finalize:
+    agent_action: finalize
+    delivery_manifest: orchestrator_delivery_manifest
+    server_owned_outputs:
+      - orchestrator_workspace_index
+      - orchestrator_archive_manifest
+    notification:
+      reporter_declares_only: true
+      server_delivers_after_seal: true
+      dolphin_credentials: false
+  local_fixture_backend:
+    enabled_only_by_explicit_backend_flag: true
+    production_allowed: false
+    execution: fixed_stage_order_conformance_harness

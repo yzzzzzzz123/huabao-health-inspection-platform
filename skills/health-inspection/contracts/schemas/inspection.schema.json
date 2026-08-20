@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Inspector business result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","run_id","business_date","stage","status","summary","dimension_summary","ranked_anomalies","cases","dismissed_anomaly_ids"],
+  "properties": {
+    "schema_version":{"type":"string","const":"1.0"},
+    "run_id":{"type":"string"},
+    "business_date":{"type":"string"},
+    "stage":{"type":"string","const":"inspector"},
+    "status":{"type":"string","const":"completed"},
+    "summary":{"type":"string"},
+    "dimension_summary":{
+      "type":"array","minItems":3,"maxItems":3,
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["dimension","score","status","assessment"],
+        "properties":{
+          "dimension":{"enum":["traffic","conversion","product"]},
+          "score":{"type":"number","minimum":0,"maximum":100},
+          "status":{"enum":["healthy","watch","risk"]},
+          "assessment":{"type":"string"}
+        }
+      }
+    },
+    "ranked_anomalies":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["rank","anomaly_id","dimension","severity","summary","confidence","evidence_refs","cluster_id"],
+        "properties":{
+          "rank":{"type":"integer","minimum":1},
+          "anomaly_id":{"type":"string"},
+          "dimension":{"enum":["traffic","conversion","product"]},
+          "severity":{"type":"string","const":"P0"},
+          "summary":{"type":"string"},
+          "confidence":{"type":"number","minimum":0,"maximum":1},
+          "evidence_refs":{"type":"array","minItems":1,"items":{"type":"string"}},
+          "cluster_id":{"type":"string"}
+        }
+      }
+    },
+    "cases":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["case_id","cluster_id","title","anomaly_ids","priority","investigation_worthy","diagnosis_questions","evidence_refs","data_gaps"],
+        "properties":{
+          "case_id":{"type":"string"},
+          "cluster_id":{"type":"string"},
+          "title":{"type":"string"},
+          "anomaly_ids":{"type":"array","minItems":1,"items":{"type":"string"}},
+          "priority":{"type":"string","const":"P0"},
+          "investigation_worthy":{"type":"boolean"},
+          "diagnosis_questions":{"type":"array","minItems":1,"items":{"type":"string"}},
+          "evidence_refs":{"type":"array","minItems":1,"items":{"type":"string"}},
+          "data_gaps":{"type":"array","items":{"type":"string"}}
+        }
+      }
+    },
+    "dismissed_anomaly_ids":{"type":"array","items":{"type":"string"}}
+  }
+}

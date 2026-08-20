@@ -1,0 +1,28 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: data_operator_agent
+  name: 华宝巡检数据 Agent
+  schema_status: draft_unverified_until_platform_integration
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    只声明并核验 data_layer、calculate、detect、validate 四个白名单确定性步骤；确认
+    37 项目录顺序、冻结政策、异常与证据闭合，不生成或改写业务数字。
+  input_artifacts:
+    - data_layer_taskbook
+    - data_layer_packet
+    - data_layer_health_policy
+  output_contract: data-operation.schema.json
+  required_command_plan:
+    - data_layer
+    - calculate
+    - detect
+    - validate
+  forbidden_capabilities:
+    - arbitrary_command
+    - arbitrary_workspace_path
+    - business_number_generation
+    - notification_delivery
+    - credentials

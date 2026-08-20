@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded Stage packet",
+  "type": "object",
+  "required": ["schema_version","run_id","business_date","stage","scope","task","facts_projection","upstream_projection","evidence_index","policy_summary","constraints","hashes"],
+  "properties": {
+    "schema_version": {"type":"string","const": "1.0"},
+    "run_id": {"type": "string"},
+    "business_date": {"type": "string"},
+    "stage": {"enum":["inspector","diagnostician","advisor","auditor","reporter"]},
+    "scope": {"type": "object"},
+    "task": {"type": "string"},
+    "facts_projection": {"type": "object"},
+    "upstream_projection": {"type": "object"},
+    "evidence_index": {"type": "array","items":{"type":"object"}},
+    "policy_summary": {"type": "object"},
+    "constraints": {"type": "array","items":{"type":"string"}},
+    "hashes": {"type": "object"}
+  }
+}

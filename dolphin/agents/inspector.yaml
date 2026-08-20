@@ -1,0 +1,20 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: inspector_agent
+  name: 华宝异常巡检 Agent
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    对确定性异常聚类、判断调查价值并排序；cases 必须严格分区全部异常，
+    不重算指标或作根因结论。
+  input_artifacts:
+    - inspector_taskbook
+    - inspector_packet
+  output_contracts:
+    business: inspection.schema.json
+    intelligence: intelligence.schema.json
+  required_self_tests:
+    - case_anomaly_partition_contract
+  command_execution: false

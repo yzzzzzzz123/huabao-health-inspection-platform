@@ -1,0 +1,21 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: reporter_agent
+  name: 华宝报告 Agent
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    综合审核支持的建议、待补证项和到期回看形成管理优先级；声明固定投递请求，
+    但不持有凭据、网络投递或通知重试能力。
+  input_artifacts:
+    - reporter_taskbook
+    - reporter_packet
+  output_contracts:
+    business: daily-report.schema.json
+    intelligence: intelligence.schema.json
+  required_self_tests:
+    - delivery_request_contract
+  command_execution: false
+  network_delivery: false

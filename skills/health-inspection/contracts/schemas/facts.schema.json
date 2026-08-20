@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Deterministic health facts",
+  "type": "object",
+  "required": ["schema_version","run_id","business_date","scope","data_quality","data_provenance","metric_catalog","health","metrics","anomalies","evidence_ids","calculated_at"],
+  "properties": {
+    "schema_version": {"type":"string","const": "2.0"},
+    "run_id": {"type": "string"},
+    "business_date": {"type": "string","pattern":"^\\d{4}-\\d{2}-\\d{2}$"},
+    "scope": {"type": "object"},
+    "data_quality": {"type": "object"},
+    "data_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connector_id","connector_contract_version","production_connected","read_only","value_provenance","warnings"],
+      "properties": {
+        "connector_id": {"type":"string","minLength":1},
+        "connector_contract_version": {"type":"string","minLength":1},
+        "production_connected": {"type":"boolean"},
+        "read_only": {"type":"boolean"},
+        "value_provenance": {"enum":["fixture_demo","production_connector"]},
+        "warnings": {"type":"array","items":{"type":"string"}}
+      }
+    },
+    "metric_catalog": {
+      "type": "object",
+      "required": ["schema_version","source","metric_count","dimension_counts","frequency_counts","frequency_provenance","frequency_confirmed","runtime_policy_sha256","scoring_status"],
+      "properties": {
+        "schema_version": {"type": "string","const": "2.0"},
+        "source": {"type": "object"},
+        "metric_count": {"type": "integer","const": 37},
+        "dimension_counts": {"type": "object"},
+        "frequency_counts": {"type": "object"},
+        "frequency_provenance": {"type":"string","const":"legacy_v1_compatibility"},
+        "frequency_confirmed": {"type":"boolean","const":false},
+        "runtime_policy_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "scoring_status":{"type":"string","const":"configured"}
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score","band","rated_band","provisional","scoring","assessment","components"],
+      "properties": {
+        "score": {"type":"integer","minimum":0,"maximum":100},
+        "band": {"enum":["healthy","watch","risk"]},
+        "rated_band": {"enum":["healthy","watch","risk"]},
+        "provisional": {"type":"boolean","const":false},
+        "scoring": {
+          "type":"object",
+          "additionalProperties":false,
+          "required":["status","source","confirmed","maximum_score","aggregation","dimension_weights"],
+          "properties":{
+            "status":{"type":"string","const":"configured"},
+            "source":{"type":"string","minLength":1},
+            "confirmed":{"type":"boolean","const":true},
+            "maximum_score":{"type":"integer","const":100},
+            "aggregation":{"enum":["arithmetic_mean","weighted_sum"]},
+            "display_weight_percent":{"type":"number","minimum":0,"maximum":100},
+            "policy_version":{"type":"string","pattern":"^v1\\.[0-9]+$"},
+            "legacy_equal_compatibility":{"type":"boolean"},
+            "metric_band_points":{
+              "type":"object",
+              "additionalProperties":false,
+              "required":["green","yellow","red"],
+              "properties":{
+                "green":{"type":"integer","const":100},
+                "yellow":{"type":"integer","const":60},
+                "red":{"type":"integer","const":0}
+              }
+            },
+            "dimension_weights":{
+              "type":"object",
+              "additionalProperties":false,
+              "required":["traffic","conversion","product"],
+              "properties":{
+                "traffic":{"type":"number","minimum":0,"maximum":1},
+                "conversion":{"type":"number","minimum":0,"maximum":1},
+                "product":{"type":"number","minimum":0,"maximum":1}
+              }
+            },
+            "dimension_weight_percentages":{
+              "type":"object",
+              "additionalProperties":false,
+              "required":["traffic","conversion","product"],
+              "properties":{
+                "traffic":{"type":"integer","minimum":1,"maximum":100},
+                "conversion":{"type":"integer","minimum":1,"maximum":100},
+                "product":{"type":"integer","minimum":1,"maximum":100}
+              }
+            },
+            "metric_weight_percentages":{
+              "type":"object",
+              "minProperties":37,
+              "maxProperties":37,
+              "patternProperties":{
+                "^HI-\\d{3}$":{"type":"integer","minimum":1,"maximum":100}
+              },
+              "additionalProperties":false
+            },
+            "band_thresholds":{
+              "type":"object",
+              "additionalProperties":false,
+              "required":["yellow_min","green_min"],
+              "properties":{
+                "yellow_min":{"type":"integer","minimum":1,"maximum":100},
+                "green_min":{"type":"integer","minimum":1,"maximum":100}
+              }
+            },
+            "dimension_band_thresholds":{
+              "type":"object",
+              "additionalProperties":false,
+              "required":["traffic","conversion","product"],
+              "properties":{
+                "traffic":{"type":"object","additionalProperties":false,"required":["yellow_min","green_min"],"properties":{"yellow_min":{"type":"integer","minimum":1,"maximum":100},"green_min":{"type":"integer","minimum":1,"maximum":100}}},
+                "conversion":{"type":"object","additionalProperties":false,"required":["yellow_min","green_min"],"properties":{"yellow_min":{"type":"integer","minimum":1,"maximum":100},"green_min":{"type":"integer","minimum":1,"maximum":100}}},
+                "product":{"type":"object","additionalProperties":false,"required":["yellow_min","green_min"],"properties":{"yellow_min":{"type":"integer","minimum":1,"maximum":100},"green_min":{"type":"integer","minimum":1,"maximum":100}}}
+              }
+            }
+          }
+        },
+        "assessment": {
+          "type":"object",
+          "additionalProperties":false,
+          "required":["evaluated_count","partially_evaluated_count","monitor_only_count","rule_covered_count","active_rule_count","total_count","ratio"],
+          "properties":{
+            "evaluated_count":{"type":"integer","minimum":0,"maximum":37},
+            "partially_evaluated_count":{"type":"integer","minimum":0,"maximum":37},
+            "monitor_only_count":{"type":"integer","minimum":0,"maximum":37},
+            "rule_covered_count":{"type":"integer","minimum":0,"maximum":37},
+            "active_rule_count":{"type":"integer","minimum":0},
+            "total_count":{"type":"integer","const":37},
+            "ratio":{"type":"number","minimum":0,"maximum":1}
+          }
+        },
+        "components": {
+          "type":"array",
+          "minItems":3,
+          "maxItems":3,
+          "items":{
+            "type":"object",
+            "additionalProperties":false,
+            "required":["dimension","score","assessment_status","weight","triggered_count","evaluated_count","partially_evaluated_count","rule_covered_count","monitor_only_count","total_count","assessment_ratio"],
+            "properties":{
+              "dimension":{"enum":["traffic","conversion","product"]},
+              "score":{"type":"number","minimum":0,"maximum":100},
+              "assessment_status":{"enum":["healthy","watch","risk"]},
+              "weight":{"type":"number","minimum":0,"maximum":1},
+              "weight_percent":{"type":"integer","minimum":1,"maximum":100},
+              "band_thresholds":{"type":"object","additionalProperties":false,"required":["yellow_min","green_min"],"properties":{"yellow_min":{"type":"integer","minimum":1,"maximum":100},"green_min":{"type":"integer","minimum":1,"maximum":100}}},
+              "triggered_count":{"type":"integer","minimum":0},
+              "evaluated_count":{"type":"integer","minimum":0},
+              "partially_evaluated_count":{"type":"integer","minimum":0},
+              "rule_covered_count":{"type":"integer","minimum":0},
+              "monitor_only_count":{"type":"integer","minimum":0},
+              "total_count":{"type":"integer","minimum":1},
+              "assessment_ratio":{"type":"number","minimum":0,"maximum":1}
+              ,"attention_count":{"type":"integer","minimum":0}
+              ,"yellow_count":{"type":"integer","minimum":0}
+              ,"red_count":{"type":"integer","minimum":0}
+            }
+          }
+        }
+      }
+    },
+    "health_policy": {
+      "type":["object","null"],
+      "properties": {
+        "version":{"type":"string","pattern":"^v1\\.[0-9]+$"},
+        "sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "effective_at":{"type":"string"},
+        "mode":{"enum":["legacy","thresholds"]},
+        "activation_mode":{"enum":["scheduled","next_inspection"],"default":"scheduled"}
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 37,
+      "maxItems": 37,
+      "items": {
+        "type": "object",
+        "required": ["id","name","dimension","frequency","metric","value","status","evaluation_status","value_provenance","outputs","technical"],
+        "properties": {
+          "id": {"type": "string","pattern": "^HI-\\d{3}$"},
+          "name": {"type": "string"},
+          "dimension": {"enum": ["traffic","conversion","product"]},
+          "frequency": {"enum": ["day","week","month"]},
+          "metric": {"type": "string"},
+          "value": {"type": "number"},
+          "status": {"enum": ["normal","abnormal","observed","unavailable"]},
+          "evaluation_status": {"enum": ["evaluated","partially_evaluated","monitor_only"]},
+          "value_provenance": {"enum":["fixture_demo","production_connector"]},
+          "health_band": {"enum":["green","yellow","red"]},
+          "health_weight_percent": {"type":"integer","minimum":1,"maximum":100},
+          "outputs": {"type": "object"},
+          "technical": {"type": "object"}
+        }
+      }
+    },
+    "anomalies": {"type": "array","items":{"type":"object"}},
+    "evidence_ids": {"type": "array","items":{"type":"string"}},
+    "calculated_at": {"type": "string"}
+  }
+}

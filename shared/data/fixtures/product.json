@@ -1,0 +1,308 @@
+{
+  "dimension": "product",
+  "source_info": [
+    {"source_id": "erp", "name": "ERP Inventory"},
+    {"source_id": "cms", "name": "Commerce CMS"},
+    {"source_id": "orders", "name": "Shopify / OMS"},
+    {"source_id": "ads", "name": "Google Ads"},
+    {"source_id": "finance", "name": "Finance / Product Cost"}
+  ],
+  "metrics": [
+    {
+      "id": "HI-022",
+      "frequency": "week",
+      "metric": "low_stock_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "ERP / WMS",
+      "format": "state_count",
+      "decimals": 0,
+      "favorable": "down",
+      "calculation_parameters": {
+        "low_stock_threshold": 5,
+        "provenance": "configured_daily_snapshot",
+        "confirmed": false
+      }
+    },
+    {
+      "id": "HI-023",
+      "frequency": "day",
+      "metric": "out_of_stock_campaign_sessions",
+      "current": 200,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "ERP / WMS + Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "down",
+      "outputs": {
+        "out_of_stock_campaign_sessions": 200,
+        "item_breakdown": [
+          {
+            "item_id": "SKU-001",
+            "campaign_id": "SITE-SEARCH-001",
+            "sessions": 200,
+            "sellable_stock_quantity": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "HI-024",
+      "frequency": "day",
+      "metric": "sellable_but_cart_failed_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Commerce API + Cart probe",
+      "format": "state_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-025",
+      "frequency": "day",
+      "metric": "stock_sync_mismatch_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "ERP + Commerce API",
+      "format": "consistency_count",
+      "decimals": 0,
+      "favorable": "down",
+      "calculation_parameters": {
+        "stock_difference_tolerance": 0,
+        "provenance": "configured_daily_snapshot",
+        "confirmed": false
+      }
+    },
+    {
+      "id": "HI-026",
+      "frequency": "day",
+      "metric": "price_mismatch_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "PDP API + Cart API",
+      "format": "consistency_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-027",
+      "frequency": "day",
+      "metric": "promotion_price_error_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Promotion system + Cart API",
+      "format": "state_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-028",
+      "frequency": "day",
+      "metric": "bundle_component_shortage_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Product master + ERP + Commerce API",
+      "format": "state_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-029",
+      "frequency": "week",
+      "metric": "high_margin_revenue_per_ad_spend",
+      "current": 4.8,
+      "baseline": 4.5,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Finance + Ads + OMS",
+      "format": "ratio",
+      "decimals": 1,
+      "favorable": "up",
+      "outputs": {
+        "high_margin_revenue_per_ad_spend": [
+          {"item_id": "SKU-HM-001", "value": 4.8},
+          {"item_id": "SKU-HM-002", "value": 4.2}
+        ]
+      }
+    },
+    {
+      "id": "HI-030",
+      "frequency": "month",
+      "metric": "low_margin_ad_spend_share",
+      "current": 10,
+      "baseline": 12,
+      "evaluation": "partially_evaluated",
+      "operator": "zero_revenue_positive_ad_spend",
+      "threshold": null,
+      "source": "Finance + Ads + OMS",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "down",
+      "calculation_inputs": [
+        {
+          "item_id": "SKU-LM-001",
+          "gross_margin_rate": 25,
+          "ad_spend": 50,
+          "item_revenue": 500,
+          "currency": "CNY"
+        },
+        {
+          "item_id": "SKU-LM-002",
+          "gross_margin_rate": 22,
+          "ad_spend": 0,
+          "item_revenue": 0,
+          "currency": "CNY"
+        }
+      ],
+      "outputs": {
+        "low_margin_ad_spend_share": [
+          {
+            "item_id": "SKU-LM-001",
+            "value": 10,
+            "currency": "CNY"
+          },
+          {
+            "item_id": "SKU-LM-002",
+            "value": null,
+            "currency": "CNY",
+            "reason": "zero_revenue_without_positive_ad_spend"
+          }
+        ],
+        "zero_revenue_positive_ad_spend_item_ids": []
+      }
+    },
+    {
+      "id": "HI-031",
+      "frequency": "week",
+      "metric": "new_item_first_7d_sessions",
+      "current": 120,
+      "baseline": 110,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Product system + Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up",
+      "outputs": {
+        "new_item_first_7d_sessions": [
+          {"item_id": "SKU-NEW-001", "sessions": 120},
+          {"item_id": "SKU-NEW-002", "sessions": 96}
+        ]
+      }
+    },
+    {
+      "id": "HI-032",
+      "frequency": "week",
+      "metric": "hot_item_available_days",
+      "current": 10,
+      "baseline": 9,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Inventory + OMS",
+      "format": "days",
+      "decimals": 1,
+      "favorable": "up",
+      "outputs": {
+        "hot_item_available_days": [
+          {"item_id": "SKU-HOT-001", "days": 10},
+          {"item_id": "SKU-HOT-002", "days": 7.5}
+        ]
+      }
+    },
+    {
+      "id": "HI-033",
+      "frequency": "month",
+      "metric": "ad_landing_item_mismatch_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Ads + Landing page configuration",
+      "format": "consistency_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-034",
+      "frequency": "month",
+      "metric": "negative_margin_item_count",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Finance + ERP",
+      "format": "state_count",
+      "decimals": 0,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-035",
+      "frequency": "month",
+      "metric": "inventory_turnover_times_180d",
+      "current": 2.4,
+      "baseline": 2.2,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Finance + ERP + OMS",
+      "format": "ratio",
+      "decimals": 1,
+      "favorable": "up",
+      "outputs": {
+        "inventory_turnover_times_180d": 2.4,
+        "sell_through_rate_180d": 65
+      }
+    },
+    {
+      "id": "HI-037",
+      "frequency": "month",
+      "metric": "slow_moving_inventory_value",
+      "current": 0,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "ERP / WMS + OMS + Product system",
+      "format": "currency",
+      "currency": "CNY",
+      "decimals": 0,
+      "favorable": "down",
+      "calculation_parameters": {
+        "slow_moving_days_threshold": 90,
+        "provenance": "configured_daily_snapshot",
+        "confirmed": false
+      },
+      "outputs": {
+        "slow_moving_inventory_value": {"amount": 0, "currency": "CNY"},
+        "slow_moving_item_count": 0,
+        "slow_moving_item_ids": []
+      }
+    }
+  ]
+}

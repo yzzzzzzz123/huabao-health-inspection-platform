@@ -1,0 +1,213 @@
+{
+  "dimension": "traffic",
+  "source_info": [
+    {"source_id": "ga4", "name": "Google Analytics 4"},
+    {"source_id": "ads", "name": "Google Ads"},
+    {"source_id": "search_console", "name": "Google Search Console"}
+  ],
+  "metrics": [
+    {
+      "id": "HI-001",
+      "frequency": "day",
+      "metric": "total_sessions",
+      "current": 700,
+      "baseline": 1000,
+      "evaluation": "evaluated",
+      "operator": "pct_drop_gte",
+      "threshold": 30,
+      "source": "Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up",
+      "outputs": {
+        "total_sessions": 700,
+        "traffic_change_rate": -30,
+        "country_breakdown": [
+          {"country": "ALL", "total_sessions": 700}
+        ]
+      }
+    },
+    {
+      "id": "HI-002",
+      "frequency": "week",
+      "metric": "active_user_change_rate",
+      "current": -8,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "signed_percentage",
+      "decimals": 1,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-003",
+      "frequency": "day",
+      "metric": "paid_ad_sessions",
+      "current": 638,
+      "baseline": 850,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-004",
+      "frequency": "day",
+      "metric": "click_to_session_rate",
+      "current": 95,
+      "baseline": 94,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Ads + Google Analytics 4",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-005",
+      "frequency": "week",
+      "metric": "paid_engagement_rate",
+      "current": 55,
+      "baseline": 60,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-006",
+      "frequency": "day",
+      "metric": "organic_search_sessions",
+      "current": 182,
+      "baseline": 280,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-007",
+      "frequency": "month",
+      "metric": "brand_search_clicks",
+      "current": 420,
+      "baseline": 400,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Search Console",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up"
+    },
+    {
+      "id": "HI-008",
+      "frequency": "month",
+      "metric": "channel_session_share",
+      "current": 30,
+      "baseline": 32,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "stable",
+      "outputs": {
+        "channel_session_share": [
+          {"channel_name": "paid_search", "value": 30},
+          {"channel_name": "paid_social", "value": 15},
+          {"channel_name": "organic_search", "value": 35},
+          {"channel_name": "direct", "value": 20}
+        ]
+      }
+    },
+    {
+      "id": "HI-009",
+      "frequency": "week",
+      "metric": "device_session_share",
+      "current": 60,
+      "baseline": 58,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "stable",
+      "outputs": {
+        "device_session_share": [
+          {"device_category": "mobile", "value": 60},
+          {"device_category": "desktop", "value": 36},
+          {"device_category": "tablet", "value": 4}
+        ]
+      }
+    },
+    {
+      "id": "HI-010",
+      "frequency": "day",
+      "metric": "landing_page_sessions",
+      "current": 980,
+      "baseline": 960,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "number",
+      "decimals": 0,
+      "favorable": "up",
+      "outputs": {
+        "landing_page_sessions": [
+          {"landing_page": "/collections/new-energy", "sessions": 620},
+          {"landing_page": "/products/power-station", "sessions": 360}
+        ]
+      }
+    },
+    {
+      "id": "HI-011",
+      "frequency": "day",
+      "metric": "bounce_rate",
+      "current": 74,
+      "baseline": 55,
+      "evaluation": "evaluated",
+      "operator": "gte",
+      "threshold": 70,
+      "source": "Google Analytics 4",
+      "format": "percentage",
+      "decimals": 1,
+      "favorable": "down"
+    },
+    {
+      "id": "HI-012",
+      "frequency": "month",
+      "metric": "source_session_change_rate",
+      "current": -6,
+      "baseline": 0,
+      "evaluation": "monitor_only",
+      "operator": null,
+      "threshold": null,
+      "source": "Google Analytics 4",
+      "format": "signed_percentage",
+      "decimals": 1,
+      "favorable": "stable",
+      "outputs": {
+        "source_session_change_rate": [
+          {"source_medium": "google / cpc", "value": -6},
+          {"source_medium": "google / organic", "value": -3},
+          {"source_medium": "(direct) / (none)", "value": 2}
+        ]
+      }
+    }
+  ]
+}

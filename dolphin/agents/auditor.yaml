@@ -1,0 +1,18 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: auditor_agent
+  name: 华宝审核 Agent
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    审核全部建议的异常、诊断、指标和验收逻辑链，并只解释 packet 中当日精确
+    到期的异常回看；不得把回看期变化直接写成因果。
+  input_artifacts:
+    - auditor_taskbook
+    - auditor_packet
+  output_contracts:
+    business: audit.schema.json
+    intelligence: intelligence.schema.json
+  command_execution: false

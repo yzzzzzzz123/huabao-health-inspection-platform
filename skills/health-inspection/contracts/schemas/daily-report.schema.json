@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reporter business result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","run_id","business_date","stage","status","headline","executive_summary","data_provenance","health_score","health_assessment","management_priorities","key_anomalies","recommended_actions","unsupported_actions","effect_reviews","decision_bottleneck","delivery_request"],
+  "properties": {
+    "schema_version":{"type":"string","const":"3.0"},
+    "run_id":{"type":"string"},
+    "business_date":{"type":"string"},
+    "stage":{"type":"string","const":"reporter"},
+    "status":{"type":"string","const":"completed"},
+    "headline":{"type":"string"},
+    "executive_summary":{"type":"string"},
+    "data_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connector_id","connector_contract_version","production_connected","read_only","value_provenance","warnings"],
+      "properties": {
+        "connector_id": {"type":"string","minLength":1},
+        "connector_contract_version": {"type":"string","minLength":1},
+        "production_connected": {"type":"boolean"},
+        "read_only": {"type":"boolean"},
+        "value_provenance": {"enum":["fixture_demo","production_connector"]},
+        "warnings": {"type":"array","items":{"type":"string"}}
+      }
+    },
+    "health_score":{"type":"integer","minimum":0,"maximum":100},
+    "health_assessment":{
+      "type":"object",
+      "additionalProperties":false,
+      "required":["band","rated_band","provisional","scoring_status","scoring_source","scoring_confirmed","evaluated_count","partially_evaluated_count","monitor_only_count","rule_covered_count","active_rule_count","total_count","ratio"],
+      "properties":{
+        "band":{"enum":["healthy","watch","risk"]},
+        "rated_band":{"enum":["healthy","watch","risk"]},
+        "provisional":{"type":"boolean","const":false},
+        "scoring_status":{"type":"string","const":"configured"},
+        "scoring_source":{"type":"string","minLength":1},
+        "scoring_confirmed":{"type":"boolean","const":true},
+        "evaluated_count":{"type":"integer","minimum":0,"maximum":37},
+        "partially_evaluated_count":{"type":"integer","minimum":0,"maximum":37},
+        "monitor_only_count":{"type":"integer","minimum":0,"maximum":37},
+        "rule_covered_count":{"type":"integer","minimum":0,"maximum":37},
+        "active_rule_count":{"type":"integer","minimum":0},
+        "total_count":{"type":"integer","const":37},
+        "ratio":{"type":"number","minimum":0,"maximum":1}
+      }
+    },
+    "management_priorities":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["rank","title","why_now","related_ids","owner","decision_needed"],
+        "properties":{
+          "rank":{"type":"integer","minimum":1},
+          "title":{"type":"string","description":"逐字符复制 action_plan.title，保留空格和标点。"},
+          "why_now":{"type":"string"},
+          "related_ids":{"type":"array","minItems":2,"items":{"type":"string"}},
+          "owner":{"type":"string"},
+          "decision_needed":{"type":"string"}
+        }
+      }
+    },
+    "key_anomalies":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["anomaly_id","summary","diagnosis","evidence_refs"],
+        "properties":{
+          "anomaly_id":{"type":"string"},
+          "summary":{"type":"string"},
+          "diagnosis":{"type":"string"},
+          "evidence_refs":{"type":"array","minItems":1,"items":{"type":"string"}}
+        }
+      }
+    },
+    "recommended_actions":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["action_id","title","action_type","owner","priority","audit_verdict","implementation_status","target_metric_ids","acceptance_criteria"],
+        "properties":{
+          "action_id":{"type":"string"},
+          "title":{"type":"string"},
+          "action_type":{"enum":["review_only","manual_adjustment"]},
+          "owner":{"type":"string"},
+          "priority":{"type":"string","const":"P0"},
+          "audit_verdict":{"enum":["supported","supported_with_caveats"]},
+          "implementation_status":{"enum":["not_applicable","manual_execution"]},
+          "target_metric_ids":{"type":"array","minItems":1,"items":{"type":"string"}},
+          "adjustment_content":{"type":"string","description":"manual_adjustment 时逐字符复制 action_plan.adjustment_content。"},
+          "acceptance_criteria":{"type":"array","minItems":1,"description":"逐项逐字符复制 action_plan.acceptance_criteria，保留空格、标点和顺序。","items":{"type":"string"}}
+        }
+      }
+    },
+    "unsupported_actions":{
+      "type":"array",
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["action_id","title","audit_verdict","reason","needed_evidence"],
+        "properties":{
+          "action_id":{"type":"string"},
+          "title":{"type":"string"},
+          "audit_verdict":{"type":"string","const":"unsupported"},
+          "reason":{"type":"string"},
+          "needed_evidence":{"type":"array","items":{"type":"string"}}
+        }
+      }
+    },
+    "effect_reviews":{"type":"array","items":{"$ref":"#/$defs/effectReview"}},
+    "decision_bottleneck":{"type":"string"},
+    "delivery_request":{
+      "type":"object",
+      "additionalProperties":false,
+      "required":["channel","mode","send"],
+      "properties":{
+        "channel":{"type":"string","const":"dingtalk_custom_robot"},
+        "mode":{"type":"string","const":"automatic_after_finalize"},
+        "send":{"type":"boolean","const":true}
+      }
+    }
+  },
+  "$defs":{
+    "effectReview":{
+      "type":"object",
+      "additionalProperties":false,
+      "required":["review_key","source_run_id","source_business_date","anomaly_id","anomaly_title","review_window","scheduled_review_date","observed_business_date","actual_interval_days","baseline_observed_date","metric_comparisons","anomaly_state","direction_alignment","deterministic_data_status","projection_sha256","conclusion","sustained_assessment","data_sufficiency","interpretation","attribution_limit"],
+      "properties":{
+        "review_key":{"type":"string"},
+        "source_run_id":{"type":"string"},
+        "source_business_date":{"type":"string"},
+        "anomaly_id":{"type":"string","pattern":"^HI-[0-9]{3}$"},
+        "anomaly_title":{"type":"string"},
+        "review_window":{"enum":["next_day","day_7"]},
+        "scheduled_review_date":{"type":"string"},
+        "observed_business_date":{"type":"string"},
+        "actual_interval_days":{"type":"integer"},
+        "baseline_observed_date":{"type":"string"},
+        "metric_comparisons":{"type":"array","minItems":1,"items":{"type":"object"}},
+        "anomaly_state":{"type":"string"},
+        "direction_alignment":{"type":"string"},
+        "deterministic_data_status":{"type":"string"},
+        "projection_sha256":{"type":"string"},
+        "conclusion":{"enum":["improved","partially_improved","unchanged","worsened","insufficient_data"]},
+        "sustained_assessment":{"type":"string"},
+        "data_sufficiency":{"type":"string"},
+        "interpretation":{"type":"string"},
+        "attribution_limit":{"type":"string"}
+      }
+    }
+  }
+}

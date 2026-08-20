@@ -1,0 +1,12 @@
+[project]
+name = "huabao-dolphin-skills"
+version = "1.0.0"
+description = "Huabao health inspection Dolphin business bundle"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.huabao]
+runtime = "stdlib-only"
+workspace_protocol = "artifact-id-only"
+timezone = "Asia/Shanghai"
+currency = "CNY"

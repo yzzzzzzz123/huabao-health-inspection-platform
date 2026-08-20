@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Run state",
+  "type": "object",
+  "required": ["schema_version","run_id","business_date","policy_version","policy_sha256","policy_effective_at","status","current_stage","failed_stage","human_takeover_required","stages","summary","created_at","updated_at"],
+  "properties": {
+    "schema_version":{"type":"string","const":"1.1"},
+    "run_id":{"type":"string"},
+    "business_date":{"type":"string"},
+    "policy_version":{"type":"string","pattern":"^v1\\.[0-9]+$"},
+    "policy_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "policy_effective_at":{"type":"string"},
+    "policy_activation_mode":{"enum":["scheduled","next_inspection"]},
+    "status":{"enum":["queued","running","completed","failed","human_takeover_required"]},
+    "current_stage":{"enum":[null,"data_operator","inspector","diagnostician","advisor","auditor","reporter","final-review"]},
+    "failed_stage":{"enum":[null,"data_operator","inspector","diagnostician","advisor","auditor","reporter","final-review"]},
+    "human_takeover_required":{"type":"boolean"},
+    "stages":{
+      "type":"object",
+      "required":["data_operator","inspector","diagnostician","advisor","auditor","reporter"],
+      "properties":{
+        "data_operator":{"$ref":"#/$defs/stage_state"},
+        "inspector":{"$ref":"#/$defs/stage_state"},
+        "diagnostician":{"$ref":"#/$defs/stage_state"},
+        "advisor":{"$ref":"#/$defs/stage_state"},
+        "auditor":{"$ref":"#/$defs/stage_state"},
+        "reporter":{"$ref":"#/$defs/stage_state"}
+      }
+    },
+    "summary":{"type":"object"},
+    "created_at":{"type":"string"},
+    "updated_at":{"type":"string"},
+    "completed_at":{"type":["string","null"]},
+    "error":{"type":["object","null"]},
+    "resumed_from_stage":{"type":["integer","null"]}
+  },
+  "$defs":{
+    "stage_state":{
+      "type":"object",
+      "required":["status","attempts","verified"],
+      "properties":{
+        "status":{"enum":["pending","queued","running","completed","failed"]},
+        "attempts":{"type":"integer","minimum":0},
+        "verified":{"type":"boolean"},
+        "error":{"type":"object"}
+      }
+    }
+  }
+}

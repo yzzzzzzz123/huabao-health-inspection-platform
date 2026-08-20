@@ -1,0 +1,52 @@
+{
+  "schema_version": "2.0",
+  "scope_id": "huabao-site-health-inspection",
+  "site_name": "华宝新能站内",
+  "timezone": "Asia/Shanghai",
+  "currency": "CNY",
+  "dimensions": [
+    "traffic",
+    "conversion",
+    "product"
+  ],
+  "metric_contract": {
+    "catalog_artifact": "shared/data/metric_catalog.json",
+    "runtime_policy_artifact": "shared/data/metric_runtime_policy.json",
+    "metric_count": 37,
+    "dimension_counts": {
+      "traffic": 12,
+      "conversion": 10,
+      "product": 15
+    },
+    "catalog_order_is_authoritative": true,
+    "runtime_requires_source_workbook": false,
+    "source_workbook_sha256_is_provenance_only": true,
+    "frozen_policy_artifact_id": "data_layer_health_policy",
+    "facts_artifact_id": "data_layer_facts"
+  },
+  "workspace_boundary": {
+    "protocol": "workspace-api-v2",
+    "addressing": "artifact_id_only",
+    "workspace_version": "2.0",
+    "create_once": true,
+    "successful_artifacts_are_immutable": true,
+    "maximum_attempts_per_stage": 3,
+    "forbidden_dolphin_capabilities": [
+      "arbitrary_server_path",
+      "repository_control",
+      "database_access",
+      "host_secret_access",
+      "notification_delivery"
+    ]
+  },
+  "business_boundary": {
+    "external_business_execution": false,
+    "advisor_action_types": [
+      "review_only",
+      "manual_adjustment"
+    ],
+    "human_owns_manual_adjustment": true,
+    "reporter_declares_fixed_delivery_request_only": true,
+    "delivery_owner": "workspace_server_after_seal"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "package_id": "huabao-health-inspection",
+  "platform": "dolphin-ai",
+  "release_version": "v1.0.0",
+  "workflow_version": "v1.0.0",
+  "skill_bundle_sha256": "e5c97e2ca157214e1bd1bde035802db56e9a770b611d094aea234462eb924a34",
+  "schema_bundle_sha256": "e021464907119ef37be8a1e10cef6bad7414867f13b466409192647570a0cc86",
+  "python": ">=3.11",
+  "runtime_dependencies": [],
+  "workspace_api_version": "2.0",
+  "workspace_addressing": "artifact_id_only",
+  "production_execution": "orchestrator_action_loop_with_hosted_agent_responses",
+  "fixture_execution": "fixed_order_local_conformance_harness_only",
+  "default_workspace_url": "http://127.0.0.1:8765",
+  "agents": [
+    "orchestrator",
+    "data-operator",
+    "inspector",
+    "diagnostician",
+    "advisor",
+    "auditor",
+    "reporter"
+  ],
+  "workflow": "dolphin/workflows/health-inspection-stage-0-to-5.yaml",
+  "release_hash_command": "python -I skills/health-inspection/scripts/orchestrator_cli.py release",
+  "migration_source": {
+    "head": "63ef013a003aad3057cc732105d45da16a4cd301",
+    "frozen_worktree_content_sha256": "c224aa3a00e9a362f3597d68c1dc5365c207945cb323522c7fcf284d2c11a059",
+    "clean_head_claimed": false
+  },
+  "dolphin_yaml_schema_status": "draft_unverified_until_platform_integration"
+}
