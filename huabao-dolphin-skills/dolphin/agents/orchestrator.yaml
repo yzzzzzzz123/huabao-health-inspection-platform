@@ -1,0 +1,37 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: orchestrator_agent
+  name: 华宝健康巡检总控
+  schema_status: draft_unverified_until_platform_integration
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    根据权威 workspace 绑定和上一轮 Broker 结果，每轮只输出一个 action 与 stage；
+    派发后先 observe，通过验证才推进下一 Stage，最终决定 finalize 或 human_takeover。
+  input_artifacts:
+    - orchestrator_daily_taskbook
+    - orchestrator_taskbook_manifest
+    - orchestrator_thread
+    - platform_release
+    - run_context
+  output_mode: structured_action
+  required_output_fields:
+    - action
+    - stage
+  allowed_actions:
+    - dispatch_data_operator
+    - dispatch
+    - observe
+    - retry
+    - relaunch_agent
+    - replace_instruction
+    - finalize
+    - human_takeover
+  forbidden_capabilities:
+    - arbitrary_workspace_path
+    - repository_control
+    - database_access
+    - notification_delivery
+    - credentials

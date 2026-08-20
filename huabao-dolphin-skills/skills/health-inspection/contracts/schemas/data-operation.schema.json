@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage 0 data operator execution receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "business_date",
+    "stage",
+    "agent",
+    "status",
+    "summary",
+    "command_plan",
+    "self_test",
+    "failure"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "2.0"},
+    "run_id": {"type": "string"},
+    "business_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "stage": {"type": "string", "const": "data_operator"},
+    "agent": {"type": "string", "const": "data_operator_agent"},
+    "status": {"enum": ["completed", "failed", "blocked"]},
+    "summary": {"type": "string"},
+    "command_plan": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"enum": ["data_layer", "calculate", "detect", "validate"]}
+    },
+    "self_test": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checks", "unresolved_issues"],
+      "properties": {
+        "status": {"enum": ["passed", "failed"]},
+        "checks": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "status", "summary"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 80},
+              "status": {"enum": ["passed", "failed"]},
+              "summary": {"type": "string", "minLength": 1, "maxLength": 240}
+            }
+          }
+        },
+        "unresolved_issues": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+      }
+    },
+    "failure": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["classification", "failed_step", "retryable", "recovery", "human_question"],
+      "properties": {
+        "classification": {"type": "string"},
+        "failed_step": {"type": "string"},
+        "retryable": {"type": "boolean"},
+        "recovery": {"type": "string"},
+        "human_question": {"type": "string"}
+      }
+    }
+  }
+}

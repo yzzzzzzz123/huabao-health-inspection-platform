@@ -1,0 +1,481 @@
+{
+  "schema_version": "2.0",
+  "workbook_catalog_sha256": "d5da59f69b1cff379e90d53c23964268e903917c0d54b68ddc2782264b26739f",
+  "metric_catalog_manifest_sha256": "be69372f569cfdc1db60775140b6b4d5ffea6fd5f7fb982a8e6632728681581d",
+  "frequency_policy": {
+    "source": "legacy_v1_compatibility",
+    "confirmed": false
+  },
+  "scoring_policy": {
+    "status": "configured",
+    "source": "production_scoring_contract",
+    "confirmed": true,
+    "maximum_score": 100,
+    "aggregation": "arithmetic_mean",
+    "display_weight_percent": 33.33,
+    "dimension_weights": {
+      "traffic": 0.3333333333333333,
+      "conversion": 0.3333333333333333,
+      "product": 0.3333333333333333
+    },
+    "dimension_score_ranges": {
+      "traffic": {
+        "minimum": 52,
+        "maximum": 91
+      },
+      "conversion": {
+        "minimum": 58,
+        "maximum": 94
+      },
+      "product": {
+        "minimum": 55,
+        "maximum": 93
+      }
+    },
+    "bands": {
+      "healthy_min": 80,
+      "watch_min": 60
+    }
+  },
+  "metrics": [
+    {
+      "id": "HI-001",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "total_sessions",
+      "output_keys": [
+        "total_sessions",
+        "traffic_change_rate",
+        "country_breakdown"
+      ],
+      "evaluation_status": "evaluated",
+      "active_alert_rule": {
+        "operator": "pct_drop_gte",
+        "threshold": 30
+      }
+    },
+    {
+      "id": "HI-002",
+      "dimension": "traffic",
+      "frequency": "week",
+      "primary_output": "active_user_change_rate",
+      "output_keys": [
+        "active_user_change_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-003",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "paid_ad_sessions",
+      "output_keys": [
+        "paid_ad_sessions"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-004",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "click_to_session_rate",
+      "output_keys": [
+        "click_to_session_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-005",
+      "dimension": "traffic",
+      "frequency": "week",
+      "primary_output": "paid_engagement_rate",
+      "output_keys": [
+        "paid_engagement_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-006",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "organic_search_sessions",
+      "output_keys": [
+        "organic_search_sessions"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-007",
+      "dimension": "traffic",
+      "frequency": "month",
+      "primary_output": "brand_search_clicks",
+      "output_keys": [
+        "brand_search_clicks"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-008",
+      "dimension": "traffic",
+      "frequency": "month",
+      "primary_output": "channel_session_share",
+      "output_keys": [
+        "channel_session_share"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-009",
+      "dimension": "traffic",
+      "frequency": "week",
+      "primary_output": "device_session_share",
+      "output_keys": [
+        "device_session_share"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-010",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "landing_page_sessions",
+      "output_keys": [
+        "landing_page_sessions"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-011",
+      "dimension": "traffic",
+      "frequency": "day",
+      "primary_output": "bounce_rate",
+      "output_keys": [
+        "bounce_rate"
+      ],
+      "evaluation_status": "evaluated",
+      "active_alert_rule": {
+        "operator": "gte",
+        "threshold": 70,
+        "secondary": {
+          "severity": "severe",
+          "operator": "gte",
+          "threshold": 80
+        }
+      }
+    },
+    {
+      "id": "HI-012",
+      "dimension": "traffic",
+      "frequency": "month",
+      "primary_output": "source_session_change_rate",
+      "output_keys": [
+        "source_session_change_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-013",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "view_to_cart_rate",
+      "output_keys": [
+        "view_to_cart_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-014",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "checkout_completion_rate",
+      "output_keys": [
+        "cart_to_checkout_rate",
+        "checkout_completion_rate",
+        "checkout_abandonment_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-015",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "payment_failure_rate",
+      "output_keys": [
+        "payment_failure_rate",
+        "gateway_failure_rate",
+        "payment_method_failure_rate",
+        "failure_reason_share"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-036",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "checkout_duration_p95_seconds",
+      "output_keys": [
+        "checkout_duration_p95_seconds",
+        "checkout_sample_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-016",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "mobile_order_conversion_rate",
+      "output_keys": [
+        "mobile_order_conversion_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-017",
+      "dimension": "conversion",
+      "frequency": "day",
+      "primary_output": "desktop_order_conversion_rate",
+      "output_keys": [
+        "desktop_order_conversion_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-018",
+      "dimension": "conversion",
+      "frequency": "week",
+      "primary_output": "refund_order_rate",
+      "output_keys": [
+        "refund_order_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-019",
+      "dimension": "conversion",
+      "frequency": "week",
+      "primary_output": "item_purchase_rate",
+      "output_keys": [
+        "item_metrics"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-020",
+      "dimension": "conversion",
+      "frequency": "week",
+      "primary_output": "paid_channel_order_rate",
+      "output_keys": [
+        "paid_channel_order_rate"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-021",
+      "dimension": "conversion",
+      "frequency": "month",
+      "primary_output": "new_customer_order_share",
+      "output_keys": [
+        "new_customer_order_share"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-022",
+      "dimension": "product",
+      "frequency": "week",
+      "primary_output": "low_stock_item_count",
+      "output_keys": [
+        "low_stock_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-023",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "out_of_stock_campaign_sessions",
+      "output_keys": [
+        "out_of_stock_campaign_sessions",
+        "item_breakdown"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-024",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "sellable_but_cart_failed_item_count",
+      "output_keys": [
+        "sellable_but_cart_failed_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-025",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "stock_sync_mismatch_item_count",
+      "output_keys": [
+        "stock_sync_mismatch_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-026",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "price_mismatch_item_count",
+      "output_keys": [
+        "price_mismatch_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-027",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "promotion_price_error_item_count",
+      "output_keys": [
+        "promotion_price_error_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-028",
+      "dimension": "product",
+      "frequency": "day",
+      "primary_output": "bundle_component_shortage_count",
+      "output_keys": [
+        "bundle_component_shortage_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-029",
+      "dimension": "product",
+      "frequency": "week",
+      "primary_output": "high_margin_revenue_per_ad_spend",
+      "output_keys": [
+        "high_margin_revenue_per_ad_spend"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-030",
+      "dimension": "product",
+      "frequency": "month",
+      "primary_output": "low_margin_ad_spend_share",
+      "output_keys": [
+        "low_margin_ad_spend_share",
+        "zero_revenue_positive_ad_spend_item_ids"
+      ],
+      "evaluation_status": "partially_evaluated",
+      "active_alert_rule": {
+        "operator": "zero_revenue_positive_ad_spend",
+        "scope": "per_item",
+        "conditions": {
+          "gross_margin_rate_lt": 30,
+          "item_revenue_eq": 0,
+          "ad_spend_gt": 0
+        }
+      }
+    },
+    {
+      "id": "HI-031",
+      "dimension": "product",
+      "frequency": "week",
+      "primary_output": "new_item_first_7d_sessions",
+      "output_keys": [
+        "new_item_first_7d_sessions"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-032",
+      "dimension": "product",
+      "frequency": "week",
+      "primary_output": "hot_item_available_days",
+      "output_keys": [
+        "hot_item_available_days"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-033",
+      "dimension": "product",
+      "frequency": "month",
+      "primary_output": "ad_landing_item_mismatch_count",
+      "output_keys": [
+        "ad_landing_item_mismatch_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-034",
+      "dimension": "product",
+      "frequency": "month",
+      "primary_output": "negative_margin_item_count",
+      "output_keys": [
+        "negative_margin_item_count"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-035",
+      "dimension": "product",
+      "frequency": "month",
+      "primary_output": "inventory_turnover_times_180d",
+      "output_keys": [
+        "inventory_turnover_times_180d",
+        "sell_through_rate_180d"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    },
+    {
+      "id": "HI-037",
+      "dimension": "product",
+      "frequency": "month",
+      "primary_output": "slow_moving_inventory_value",
+      "output_keys": [
+        "slow_moving_inventory_value",
+        "slow_moving_item_count",
+        "slow_moving_item_ids"
+      ],
+      "evaluation_status": "monitor_only",
+      "active_alert_rule": null
+    }
+  ]
+}

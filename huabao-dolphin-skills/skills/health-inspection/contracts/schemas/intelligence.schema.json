@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compact Agent intelligence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent","stage","analysis_summary","self_test","decisions","evidence_assessments","confidence_updates","human_handoffs"],
+  "properties": {
+    "agent": {"type":"string"},
+    "stage": {"enum":["inspector","diagnostician","advisor","auditor","reporter"]},
+    "analysis_summary": {"type":"string"},
+    "self_test": {
+      "type":"object",
+      "additionalProperties":false,
+      "required":["status","checks","unresolved_issues"],
+      "properties":{
+        "status":{"enum":["passed","failed"]},
+        "checks":{
+          "type":"array",
+          "minItems":3,
+          "maxItems":8,
+          "items":{
+            "type":"object",
+            "additionalProperties":false,
+            "required":["name","status","summary"],
+            "properties":{
+              "name":{"type":"string","minLength":1,"maxLength":80},
+              "status":{"enum":["passed","failed"]},
+              "summary":{"type":"string","minLength":1,"maxLength":240}
+            }
+          }
+        },
+        "unresolved_issues":{"type":"array","maxItems":5,"items":{"type":"string","minLength":1,"maxLength":240}}
+      }
+    },
+    "decisions": {
+      "type":"array",
+      "minItems":1,
+      "items":{
+        "type":"object",
+        "additionalProperties":false,
+        "required":["decision_id","decision_type","question","selected","alternatives_considered","evidence_refs","rationale","confidence","uncertainty","human_handoff"],
+        "properties":{
+          "decision_id":{"type":"string"},
+          "decision_type":{"type":"string"},
+          "question":{"type":"string"},
+          "selected":{"type":"string"},
+          "alternatives_considered":{"type":"array","items":{"type":"string"}},
+          "evidence_refs":{"type":"array","items":{"type":"string"}},
+          "rationale":{"type":"string"},
+          "confidence":{"type":"number","minimum":0,"maximum":1},
+          "uncertainty":{"type":"string"},
+          "human_handoff":{"type":"string"}
+        }
+      }
+    },
+    "evidence_assessments": {
+      "type":"array",
+      "items":{
+        "type":"object",
+        "additionalProperties":false,
+        "required":["evidence_id","assessment","reliability"],
+        "properties":{
+          "evidence_id":{"type":"string"},
+          "assessment":{"type":"string"},
+          "reliability":{"enum":["high","medium","low","unavailable"]}
+        }
+      }
+    },
+    "confidence_updates": {
+      "type":"array",
+      "items":{
+        "type":"object",
+        "additionalProperties":false,
+        "required":["subject_id","before","after","reason"],
+        "properties":{
+          "subject_id":{"type":"string"},
+          "before":{"type":"number","minimum":0,"maximum":1},
+          "after":{"type":"number","minimum":0,"maximum":1},
+          "reason":{"type":"string"}
+        }
+      }
+    },
+    "human_handoffs": {"type":"array","items":{"type":"string"}},
+    "controlled_bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "effect_reviews": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_stage", "source_field", "item_count", "sha256"],
+          "properties": {
+            "source_stage": {"type": "string", "const": "auditor"},
+            "source_field": {"type": "string", "const": "effect_reviews"},
+            "item_count": {"type": "integer", "minimum": 0},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    }
+  }
+}

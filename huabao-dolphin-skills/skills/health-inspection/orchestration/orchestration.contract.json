@@ -1,0 +1,171 @@
+{
+  "schema_version": "3.0",
+  "application_id": "huabao-health-inspection",
+  "workspace": {
+    "protocol": "workspace-api-v2",
+    "workspace_version": "2.0",
+    "run_id": "hi-{business_date}",
+    "addressing": "artifact_id_only",
+    "required_binding_headers": [
+      "X-Workspace-Incarnation",
+      "X-Platform-Release-SHA256"
+    ],
+    "write_contract": {
+      "body": "raw_bytes",
+      "content_hash_header": "X-Content-SHA256",
+      "create_once_header": "If-None-Match: *",
+      "same_bytes_replay": "idempotent",
+      "different_bytes_replay": "conflict"
+    },
+    "server_owned_artifacts": [
+      "platform_release",
+      "orchestrator_workspace_index",
+      "orchestrator_archive_manifest"
+    ],
+    "dolphin_forbidden_inputs": [
+      "arbitrary_server_path",
+      "host_credentials",
+      "storage_handle",
+      "notification_endpoint"
+    ]
+  },
+  "release_binding": {
+    "platform": "dolphin-ai",
+    "application_id": "huabao-health-inspection",
+    "strict_fields": [
+      "platform",
+      "application_id",
+      "release_version",
+      "workflow_version",
+      "skill_bundle_sha256",
+      "schema_bundle_sha256",
+      "bound_at"
+    ],
+    "bound_at_owner": "workspace_server",
+    "immutable_after_create": true
+  },
+  "agents": [
+    "orchestrator_agent",
+    "data_operator_agent",
+    "inspector_agent",
+    "diagnostician_agent",
+    "advisor_agent",
+    "auditor_agent",
+    "reporter_agent"
+  ],
+  "stage_order": [
+    "data_operator",
+    "inspector",
+    "diagnostician",
+    "advisor",
+    "auditor",
+    "reporter"
+  ],
+  "attempts": {
+    "maximum_per_stage": 3,
+    "slots": [
+      "001",
+      "002",
+      "003"
+    ],
+    "artifact_suffixes": [
+      "attempt",
+      "request",
+      "response_raw",
+      "events",
+      "cli",
+      "artifacts"
+    ],
+    "failed_attempt_is_durable": true,
+    "partial_attempt_resume": "read_hash_validate_and_complete_same_slot",
+    "successful_stage_overwrite": false
+  },
+  "stage_gates": {
+    "data_operator": [
+      "catalog_has_exactly_37_unique_metrics_in_catalog_order",
+      "catalog_manifest_matches_runtime_policy",
+      "policy_binding_is_frozen",
+      "facts_evidence_and_manifest_are_hash_closed"
+    ],
+    "inspector": [
+      "all_deterministic_anomalies_form_one_exact_partition",
+      "case_anomaly_partition_contract_passes"
+    ],
+    "diagnostician": [
+      "each_case_has_competing_hypotheses",
+      "root_cause_confidence_respects_evidence_boundary"
+    ],
+    "advisor": [
+      "action_type_is_review_only_or_manual_adjustment",
+      "manual_adjustment_closes_anomaly_diagnosis_metric_action_direction_and_acceptance"
+    ],
+    "auditor": [
+      "all_actions_are_audited",
+      "logic_chain_and_due_effect_review_are_bounded"
+    ],
+    "reporter": [
+      "only_supported_actions_are_recommended",
+      "delivery_request_contract_passes",
+      "delivery_request_is_fixed"
+    ],
+    "common": [
+      "central_schema_passes",
+      "self_test_status_is_passed",
+      "all_named_checks_pass",
+      "unresolved_issues_is_empty",
+      "cross_stage_ids_and_evidence_refs_close"
+    ]
+  },
+  "recovery": {
+    "resume_uses_same_run_and_incarnation": true,
+    "resume_requires_persisted_incarnation_and_release_sha": true,
+    "unbound_workspace_get_forbidden": true,
+    "existing_artifacts_are_read_and_hash_verified": true,
+    "next_stage_is_derived_from_completed_artifacts": true,
+    "finalization_is_deterministic": true,
+    "finalization_timestamp_source": "platform_release.bound_at",
+    "sealed_resume_returns_existing_delivery_manifest": true
+  },
+  "finalization": {
+    "required_dolphin_artifacts": [
+      "orchestrator_thread",
+      "orchestrator_intelligence_ledger",
+      "orchestrator_execution_ledger",
+      "orchestrator_ui_snapshot",
+      "orchestrator_memory",
+      "orchestrator_events",
+      "orchestrator_action_implementation",
+      "orchestrator_log_summary",
+      "orchestrator_delivery_manifest"
+    ],
+    "delivery_manifest_binding_fields": [
+      "run_id",
+      "business_date",
+      "incarnation_id",
+      "platform_release_sha256",
+      "platform_release"
+    ],
+    "delivery_manifest_phase": "pre_seal_snapshot",
+    "delivery_manifest_excludes": [
+      "orchestrator_delivery_manifest",
+      "orchestrator_workspace_index",
+      "orchestrator_archive_manifest"
+    ],
+    "server_final_snapshots": [
+      "orchestrator_workspace_index",
+      "orchestrator_archive_manifest"
+    ],
+    "server_owned_run_state_transition": "open_to_sealed",
+    "seal_uses_actual_uploaded_manifest_sha256": true,
+    "delivery": {
+      "reporter_declares_intent_only": true,
+      "delivery_owner": "workspace_server_after_seal",
+      "credentials_available_to_dolphin": false
+    }
+  },
+  "backend": {
+    "production": "dolphin_hosted_response",
+    "fixture": "explicit_local_e2e_only",
+    "fixture_production_allowed": false
+  }
+}

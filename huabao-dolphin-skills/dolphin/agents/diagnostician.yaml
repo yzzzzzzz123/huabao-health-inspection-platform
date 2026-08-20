@@ -1,0 +1,18 @@
+schema_version: "1.0"
+kind: dolphin.agent
+metadata:
+  id: diagnostician_agent
+  name: 华宝诊断 Agent
+spec:
+  managed_execution: true
+  skill: skills/health-inspection/SKILL.md
+  role: >
+    为每个 Inspector case 检验至少两个竞争性假设，区分事实、反证与数据缺口，
+    给出有证据边界的根因置信度。
+  input_artifacts:
+    - diagnostician_taskbook
+    - diagnostician_packet
+  output_contracts:
+    business: diagnosis.schema.json
+    intelligence: intelligence.schema.json
+  command_execution: false
