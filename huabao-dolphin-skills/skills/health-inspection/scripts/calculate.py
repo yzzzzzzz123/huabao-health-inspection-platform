@@ -24,11 +24,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.models import METRIC_COVERAGE, MetricSnapshot  # noqa: E402
-from shared.audit import sha256_json  # noqa: E402
 from policy_store import (  # noqa: E402
-    METRIC_DESCRIPTION_MAX_LENGTH,
     policy_activation_mode,
     policy_runtime_gate_projection,
+    validate_frozen_policy,
 )
 
 
@@ -40,7 +39,6 @@ SCORING_CONFIG_FIELDS = {
     "band_thresholds",
     "dimension_band_thresholds",
 }
-POLICY_ACTIVATION_MODES = {"scheduled", "next_inspection"}
 METRIC_BAND_POINTS = {"green": 100, "yellow": 60, "red": 0}
 RATIO_FORMULA_PATTERN = re.compile(
     r"(?P<result>[A-Za-z0-9_]+)（(?P<result_label>[^）]+)）＝"
@@ -870,40 +868,17 @@ def history_for(metric: dict[str, Any], business_date: str) -> list[dict[str, An
     return result
 
 
-def _validated_frozen_policy(policy: dict[str, Any] | None) -> dict[str, Any] | None:
+def _validated_frozen_policy(
+    policy: dict[str, Any] | None,
+) -> dict[str, Any]:
     if policy is None:
-        return None
-    if not isinstance(policy, dict) or policy.get("schema_version") != "1.0":
-        raise ValueError("frozen health policy has an unsupported schema")
-    hashed = dict(policy)
-    recorded_hash = str(hashed.pop("sha256", ""))
-    if sha256_json(hashed) != recorded_hash:
-        raise ValueError("frozen health policy SHA-256 is invalid")
-    rules = policy.get("rules")
-    if not isinstance(rules, list) or len(rules) != METRIC_COVERAGE["total"]:
-        raise ValueError("frozen health policy must contain exactly 37 rules")
-    if any(not isinstance(item, dict) for item in rules):
-        raise ValueError("frozen health policy rules must be objects")
-    if any(
-        not isinstance(item.get("description"), str)
-        or not str(item["description"]).strip()
-        or len(str(item["description"]).strip()) > METRIC_DESCRIPTION_MAX_LENGTH
-        for item in rules
-    ):
-        raise ValueError("frozen health policy metric descriptions are invalid")
-    ids = [str(item.get("metric_id") or "") for item in rules]
-    if len(ids) != len(set(ids)) or any(
-        not re.fullmatch(r"HI-\d{3}", item) for item in ids
-    ):
-        raise ValueError("frozen health policy contains invalid metric identities")
-    if policy.get("mode") not in {"legacy", "thresholds"}:
-        raise ValueError("frozen health policy mode is invalid")
-    activation_mode = policy.get("activation_mode")
-    if activation_mode is not None and activation_mode not in POLICY_ACTIVATION_MODES:
-        raise ValueError("frozen health policy activation_mode is invalid")
-    metric_dimensions = _metric_dimensions_from_rules(policy)
-    _materialize_scoring_config(policy, metric_dimensions)
-    return policy
+        raise ValueError("a Server-frozen health policy is required")
+    if not isinstance(policy, dict):
+        raise ValueError("frozen health policy must be an object")
+    validated = validate_frozen_policy(policy)
+    metric_dimensions = _metric_dimensions_from_rules(validated)
+    _materialize_scoring_config(validated, metric_dimensions)
+    return validated
 
 
 def _configured_band(metric: dict[str, Any], rule: dict[str, Any]) -> str:
@@ -1026,18 +1001,14 @@ def _configured_health(
 
 def calculate(
     source: dict[str, Any],
-    policy: dict[str, Any] | None = None,
+    policy: dict[str, Any],
 ) -> dict[str, Any]:
     frozen_policy = _validated_frozen_policy(policy)
-    runtime_gate = (
-        policy_runtime_gate_projection(frozen_policy)
-        if frozen_policy is not None
-        else None
-    )
-    threshold_mode = bool(runtime_gate and runtime_gate["mode"] == "thresholds")
+    runtime_gate = policy_runtime_gate_projection(frozen_policy)
+    threshold_mode = runtime_gate["mode"] == "thresholds"
     policy_rules = {
         str(item["metric_id"]): dict(item)
-        for item in (frozen_policy or {}).get("rules", [])
+        for item in frozen_policy["rules"]
     }
     metrics: list[dict[str, Any]] = []
     anomaly_counts = {"traffic": 0, "conversion": 0, "product": 0}
@@ -1051,15 +1022,7 @@ def calculate(
     value_provenance = "fixture_demo" if fixture_demo else "production_connector"
     connector = dict(source.get("connector") or {})
     data_warnings = list(source.get("data_quality", {}).get("warnings") or [])
-    metric_dimensions = (
-        _metric_dimensions_from_rules(frozen_policy)
-        if frozen_policy is not None
-        else {
-            str(item.get("id") or ""): str(item.get("dimension") or "")
-            for item in source["metrics"]
-            if isinstance(item, dict)
-        }
-    )
+    metric_dimensions = _metric_dimensions_from_rules(frozen_policy)
     scoring_contract = _scoring_contract(frozen_policy, metric_dimensions)
     for raw in source["metrics"]:
         metric = dict(raw)
@@ -1214,9 +1177,8 @@ def calculate(
         projected_metric["technical"]["health_score_weight_percent"] = (
             metric_weight_percent
         )
-        if frozen_policy is not None:
-            projected_metric["policy_version"] = frozen_policy["version"]
-            projected_metric["policy_sha256"] = frozen_policy["sha256"]
+        projected_metric["policy_version"] = frozen_policy["version"]
+        projected_metric["policy_sha256"] = frozen_policy["sha256"]
         if frozen_rule is not None:
             projected_metric["technical"]["health_policy_rule"] = frozen_rule
         if configured_band is not None:
@@ -1261,31 +1223,21 @@ def calculate(
     partially_evaluated_count = sum(partially_assessed_counts.values())
     rule_covered_count = evaluated_count + partially_evaluated_count
     monitor_only_count = METRIC_COVERAGE["total"] - rule_covered_count
-    if runtime_gate is not None:
-        expected_evaluation = runtime_gate["evaluation"]
-        actual_evaluation = {
-            "evaluated": evaluated_count,
-            "partially_evaluated": partially_evaluated_count,
-            "monitor_only": monitor_only_count,
-            "rule_covered": rule_covered_count,
-        }
-        if any(
-            actual_evaluation[key] != expected_evaluation[key]
-            for key in actual_evaluation
-        ):
-            raise ValueError(
-                "calculated evaluation coverage differs from the frozen health policy"
-            )
-        active_rule_count = int(expected_evaluation["active_rules"])
-    else:
-        # The production workflow always supplies a frozen policy. Keep the
-        # standalone calculator compatible without falling back to a versioned
-        # constant by deriving the legacy count from the source contract.
-        active_rule_count = sum(
-            1
-            for item in source["metrics"]
-            if bool(item.get("technical", {}).get("active_alert_rule"))
+    expected_evaluation = runtime_gate["evaluation"]
+    actual_evaluation = {
+        "evaluated": evaluated_count,
+        "partially_evaluated": partially_evaluated_count,
+        "monitor_only": monitor_only_count,
+        "rule_covered": rule_covered_count,
+    }
+    if any(
+        actual_evaluation[key] != expected_evaluation[key]
+        for key in actual_evaluation
+    ):
+        raise ValueError(
+            "calculated evaluation coverage differs from the frozen health policy"
         )
+    active_rule_count = int(expected_evaluation["active_rules"])
     metric_catalog = dict(source["metric_catalog"])
     metric_catalog["scoring_status"] = "configured"
     health_basis = {
@@ -1331,31 +1283,24 @@ def calculate(
                 policy=frozen_policy,
             )
         ),
-        "health_policy": (
-            {
-                "version": frozen_policy["version"],
-                "sha256": frozen_policy["sha256"],
-                "effective_at": frozen_policy["effective_at"],
-                "mode": frozen_policy["mode"],
-                "activation_mode": policy_activation_mode(frozen_policy),
-            }
-            if frozen_policy is not None
-            else None
-        ),
+        "health_policy": {
+            "version": frozen_policy["version"],
+            "published_sha256": frozen_policy["published_sha256"],
+            "sha256": frozen_policy["sha256"],
+            "effective_at": frozen_policy["effective_at"],
+            "mode": frozen_policy["mode"],
+            "activation_mode": policy_activation_mode(frozen_policy),
+        },
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
-    parser.add_argument("--policy", type=Path)
+    parser.add_argument("--policy", type=Path, required=True)
     args = parser.parse_args()
     source = json.loads(args.source.read_text(encoding="utf-8"))
-    policy = (
-        json.loads(args.policy.read_text(encoding="utf-8"))
-        if args.policy is not None
-        else None
-    )
+    policy = json.loads(args.policy.read_text(encoding="utf-8"))
     print(json.dumps(calculate(source, policy), ensure_ascii=False, indent=2))
 
 

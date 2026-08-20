@@ -26,7 +26,8 @@ from typing import Any, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
+SERVER_ROOT = SCRIPT_DIR.parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -157,7 +158,7 @@ def _resolve_source_root(value: str) -> Path:
     if source_root.name != LEGACY_PROJECT_NAME:
         raise MigrationError("source-root is not the fixed legacy project root")
 
-    target_root = PROJECT_ROOT.resolve(strict=True)
+    target_root = REPOSITORY_ROOT.resolve(strict=True)
     if (
         _same_path(source_root, target_root)
         or _is_within(target_root, source_root)
@@ -646,14 +647,14 @@ def _parse_bundle(snapshot: SourceSnapshot) -> ImportBundle:
 
 
 def _database_paths() -> tuple[Path, tuple[Path, ...]]:
-    state_root = PROJECT_ROOT / ".huabao"
+    state_root = REPOSITORY_ROOT / ".huabao"
     if state_root.exists():
         _require_regular_directory(state_root, label="target policy state directory")
     else:
         state_root.mkdir(mode=0o700)
         _require_regular_directory(state_root, label="target policy state directory")
-    if state_root.resolve(strict=True).parent != PROJECT_ROOT.resolve(strict=True):
-        raise MigrationError("target policy state escaped the server root")
+    if state_root.resolve(strict=True).parent != REPOSITORY_ROOT.resolve(strict=True):
+        raise MigrationError("target policy state escaped the monorepo root")
     database = state_root / "workbench-policy.sqlite3"
     related = (
         database,
@@ -678,13 +679,13 @@ def _reserve_empty_database(database: Path, related: Sequence[Path]) -> None:
 
 
 def _remove_created_database(related: Sequence[Path]) -> None:
-    state_root = (PROJECT_ROOT / ".huabao").resolve(strict=True)
+    state_root = (REPOSITORY_ROOT / ".huabao").resolve(strict=True)
     for path in reversed(tuple(related)):
         if not path.exists() and not path.is_symlink():
             continue
         lexical = Path(os.path.abspath(os.fspath(path)))
         if lexical.parent != state_root:
-            raise MigrationError("target database cleanup escaped the server root")
+            raise MigrationError("target database cleanup escaped the monorepo root")
         _require_regular_file(path, label="created target database file")
         path.unlink()
 
@@ -699,7 +700,7 @@ def _import_legacy(source_value: str, expected_head: str) -> dict[str, Any]:
     _reserve_empty_database(database, related)
     imported = False
     try:
-        store = WorkbenchPolicyStore(PROJECT_ROOT, database_path=database)
+        store = WorkbenchPolicyStore(REPOSITORY_ROOT, database_path=database)
         overview = store.import_state(
             bundle.versions,
             bundle.draft,
@@ -731,7 +732,7 @@ def _import_legacy(source_value: str, expected_head: str) -> dict[str, Any]:
 
 
 def _read_status(database: Path | None = None) -> dict[str, Any]:
-    selected = database or (PROJECT_ROOT / ".huabao" / "workbench-policy.sqlite3")
+    selected = database or (REPOSITORY_ROOT / ".huabao" / "workbench-policy.sqlite3")
     if _is_redirect(selected):
         raise MigrationError("target workbench policy database must not be a link")
     if not selected.exists():

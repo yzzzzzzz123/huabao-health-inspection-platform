@@ -14,9 +14,10 @@ from typing import Any, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SERVER_ROOT = SCRIPT_DIR.parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -81,13 +82,34 @@ def ensure_git_root(project_root: Path) -> None:
     root = project_root.resolve()
     completed = run_git(root, ["rev-parse", "--show-toplevel"], check=False)
     if completed.returncode != 0:
-        raise GitWorkspaceError("Workspace Server directory is not a Git repository")
+        raise GitWorkspaceError("Huabao platform directory is not a Git repository")
     try:
         reported = Path(completed.stdout.strip()).resolve()
     except OSError as exc:
         raise GitWorkspaceError("Git returned an invalid repository root") from exc
     if reported != root:
-        raise GitWorkspaceError("Workspace Server must be an independent Git root")
+        raise GitWorkspaceError("repository_root must be the exact Huabao monorepo Git root")
+    dot_git = root / ".git"
+    is_junction = getattr(dot_git, "is_junction", None)
+    if (
+        not dot_git.is_dir()
+        or dot_git.is_symlink()
+        or (is_junction is not None and is_junction())
+    ):
+        raise GitWorkspaceError("Workspace Server must run from the primary monorepo worktree")
+    absolute_git_dir = run_git(root, ["rev-parse", "--absolute-git-dir"])
+    common_git_dir = run_git(
+        root,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    try:
+        git_dir = Path(absolute_git_dir.stdout.strip()).resolve()
+        common_dir = Path(common_git_dir.stdout.strip()).resolve()
+    except OSError as exc:
+        raise GitWorkspaceError("Git returned an invalid common directory") from exc
+    expected_git_dir = dot_git.resolve()
+    if git_dir != expected_git_dir or common_dir != expected_git_dir:
+        raise GitWorkspaceError("Workspace Server cannot run from a linked or bare worktree")
 
 
 def current_head(project_root: Path) -> str | None:
@@ -335,16 +357,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.command == "config":
             from shared.runtime_env import load_workspace_config
 
-            _json_output(load_workspace_config(PROJECT_ROOT).public_projection())
+            _json_output(load_workspace_config(SERVER_ROOT).public_projection())
             return 0
         from workspace_api import WorkspaceService
 
-        service = WorkspaceService(PROJECT_ROOT)
+        service = WorkspaceService(REPOSITORY_ROOT, server_root=SERVER_ROOT)
         if arguments.command == "list":
             _json_output(
                 {
                     "workspaces": service.list_workspaces(),
-                    "git_worktrees": list_linked_worktrees(PROJECT_ROOT),
+                    "git_worktrees": list_linked_worktrees(REPOSITORY_ROOT),
                 }
             )
         elif arguments.command == "show":

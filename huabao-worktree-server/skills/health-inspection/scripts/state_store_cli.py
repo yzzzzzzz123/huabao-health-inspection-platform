@@ -10,9 +10,10 @@ from typing import Any, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SERVER_ROOT = SCRIPT_DIR.parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -38,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
-        store = StateStore(PROJECT_ROOT)
+        store = StateStore(REPOSITORY_ROOT)
         if arguments.command == "list":
             _print({"runs": store.list_runs()})
         elif arguments.command == "show":

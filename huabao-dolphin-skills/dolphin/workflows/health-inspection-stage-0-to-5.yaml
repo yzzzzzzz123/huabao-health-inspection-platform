@@ -38,11 +38,11 @@ spec:
     required_server_inputs:
       - platform_release
       - run_context
+      - data_layer_health_policy
     outputs:
       - orchestrator_daily_taskbook
       - orchestrator_taskbook_manifest
       - orchestrator_thread
-      - data_layer_health_policy
   production_control_loop:
     decision_owner: orchestrator_agent
     required_decision_fields: [action, stage]

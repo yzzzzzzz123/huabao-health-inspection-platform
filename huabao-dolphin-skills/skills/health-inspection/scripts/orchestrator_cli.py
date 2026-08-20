@@ -29,7 +29,7 @@ from packet_builder import (  # noqa: E402
     build_daily_taskbook,
     build_taskbook_manifest,
 )
-from policy_store import build_default_frozen_policy  # noqa: E402
+from policy_store import validate_frozen_policy  # noqa: E402
 from worker import execute_agent_stage, execute_stage0  # noqa: E402
 from workspace_client import (  # noqa: E402
     WorkspaceAccessBinding,
@@ -209,8 +209,7 @@ def _ensure_bootstrap(
     *,
     client: WorkspaceClient,
     binding: WorkspaceBinding,
-    policy: dict[str, Any],
-) -> tuple[WorkspaceBinding, dict[str, Any]]:
+) -> tuple[WorkspaceBinding, dict[str, Any], dict[str, Any]]:
     binding, artifacts, payload = client.get_workspace(
         binding.run_id,
         binding=binding,
@@ -225,16 +224,18 @@ def _ensure_bootstrap(
         if release_artifact != binding.platform_release:
             raise RuntimeError("server platform_release artifact differs from binding")
     existing_policy = artifacts.get("data_layer_health_policy")
-    if existing_policy is not None:
-        frozen = client.get_json(
-            binding,
-            "data_layer_health_policy",
-            expected_sha256=existing_policy.sha256,
+    if existing_policy is None:
+        raise RuntimeError(
+            "workspace is missing the Server-owned frozen health-policy artifact"
         )
-        if frozen != policy:
-            raise RuntimeError("workspace policy differs from bundled default")
-    else:
-        client.put_json(binding, "data_layer_health_policy", policy)
+    frozen = client.get_json(
+        binding,
+        "data_layer_health_policy",
+        expected_sha256=existing_policy.sha256,
+    )
+    if not isinstance(frozen, dict):
+        raise RuntimeError("workspace frozen health-policy artifact must be an object")
+    policy = validate_frozen_policy(frozen)
     taskbook = build_daily_taskbook(
         binding=_binding_dict(binding),
         policy=policy,
@@ -246,7 +247,7 @@ def _ensure_bootstrap(
     )
     client.put_text(binding, "orchestrator_daily_taskbook", taskbook)
     client.put_json(binding, "orchestrator_taskbook_manifest", taskbook_manifest)
-    return binding, payload
+    return binding, payload, policy
 
 
 def _ensure_thread(
@@ -783,11 +784,9 @@ def run_command(args: argparse.Namespace) -> dict[str, Any]:
         incarnation_id=args.incarnation_id,
         platform_release_sha256=args.platform_release_sha256,
     )
-    policy = build_default_frozen_policy()
-    binding, _ = _ensure_bootstrap(
+    binding, _, policy = _ensure_bootstrap(
         client=client,
         binding=binding,
-        policy=policy,
     )
     hosted = _hosted_responses(args)
     _ensure_thread(

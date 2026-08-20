@@ -1,7 +1,11 @@
 # Huabao Dolphin Skills
 
-这是华宝健康巡检拆分后的纯 Dolphin 业务根，包含 7 个 Agent、Stage 0～5 业务合同、
+这是华宝健康巡检 monorepo 中的 Dolphin 业务组件，包含 7 个 Agent、Stage 0～5 业务合同、
 37 项指标数据层、中央 Schema、确定性校验、渲染和 Workspace API 客户端。
+
+本目录不是独立 Git 根，但可从一个固定 monorepo snapshot 单独构建并上传 AI 平台。
+服务端作为另一部署单元运行时仍须保留完整 monorepo checkout，以创建同时包含
+`huabao-dolphin-skills/` 与 `huabao-worktree-server/` 的日期 linked worktree。
 
 ## 边界
 
@@ -9,6 +13,9 @@
 - Workspace Server 负责日期身份、持久化、调度、封存、归档、删除和实际外部投递。
 - 所有工作区内容只按 artifact ID 读写，并绑定 run_id、incarnation_id 与
   platform_release_sha256；Dolphin 不接受任意服务器路径或宿主凭据。
+- `data_layer_health_policy` 是 Server 在 workspace 创建时写入的不可变输入；Dolphin
+  只 GET 并校验 artifact 字节 SHA、`published_sha256` 与完整运行政策 `sha256`，从不
+  构造或 PUT 默认政策。没有已发布政策版本时必须在创建 workspace 前失败关闭。
 - platform_release 正式对象严格只有七字段，bound_at 由服务器创建工作区时生成。
 - run_context 是服务器冻结的安全历史投影；Dolphin 只读取其中最多近 7 日的 +1/+6
   到期来源，不扫描任何历史存储。
@@ -23,7 +30,7 @@
       --backend fixture
 
 fixture 是明确标记的固定顺序本地合同演练，只用于 E2E 与恢复检查，不代表生产七 Agent
-调度。生产使用 backend=dolphin，并通过 --hosted-responses 或
+调度，也不提供政策默认值或绕过政策绑定。生产使用 backend=dolphin，并通过 --hosted-responses 或
 DOLPHIN_HOSTED_RESPONSES_JSON 注入 Dolphin 托管结果。
 
 生产输入必须含：
@@ -50,6 +57,9 @@ workspace index 与 archive manifest，避免自引用并保留唯一受控状�
 机械迁移来源标识为 HEAD 63ef013a003aad3057cc732105d45da16a4cd301，初始冻结工作树
 内容 SHA-256 为 c224aa3a00e9a362f3597d68c1dc5365c207945cb323522c7fcf284d2c11a059。
 该基线描述当时冻结的工作树字节，不声称来源工作树等于 clean HEAD。
+原独立仓库历史已通过未 squash 的 subtree merge 保留在父 monorepo 中；导入前文件使用
+旧仓库根路径，查看旧提交时应从原 HEAD `854f02e42d26e2eb0115f23179b21cc8f78dc339`
+按旧路径查询。
 
 ## 平台集成状态
 

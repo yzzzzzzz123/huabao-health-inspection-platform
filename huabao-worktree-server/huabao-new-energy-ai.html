@@ -11921,12 +11921,12 @@
         var versions = [];
         (components || []).forEach(function (component) {
           (Array.isArray(component.history) ? component.history : []).forEach(function (point) {
-            var version = String(point && point.policy_version || "v1.0");
+            var version = String(point && point.policy_version || "未记录");
             if (versions.indexOf(version) < 0) versions.push(version);
           });
         });
         if (!versions.length && app.dashboard && app.dashboard.health_policy) {
-          versions.push(String(app.dashboard.health_policy.version || "v1.0"));
+          versions.push(String(app.dashboard.health_policy.version || "未记录"));
         }
         versions.sort(function (left, right) {
           return left.localeCompare(right, undefined, { numeric: true });
@@ -11999,11 +11999,11 @@
           var history = Array.isArray(component.history)
             ? component.history.filter(function (item) {
                 return item && item.value != null && Number.isFinite(Number(item.value)) &&
-                  (selectedVersion === "all" || String(item.policy_version || "v1.0") === selectedVersion);
+                  (selectedVersion === "all" || String(item.policy_version || "未记录") === selectedVersion);
               })
             : [];
           if (!history.length) {
-            var currentVersion = String(app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "v1.0");
+            var currentVersion = String(app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "未记录");
             if (selectedVersion === "all" || selectedVersion === currentVersion) {
               history = [{
                 label: currentLabel,
@@ -12179,7 +12179,7 @@
               overlap: overlapSlots[seriesIndex][label] || { count: 1 },
               value: pointValue,
               band: healthBandFromThresholds(pointValue, pointThresholds),
-              policyVersion: String(sourcePoint.policy_version || "v1.0")
+              policyVersion: String(sourcePoint.policy_version || "未记录")
             };
           }).filter(Boolean);
           if (!points.length) return "";
@@ -12362,7 +12362,7 @@
         (Array.isArray(health.history) ? health.history : []).forEach(function (point) {
           if (point && point.date) overallHistoryByDate[point.date] = point;
         });
-        var dashboardPolicyVersion = String(app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "v1.0");
+        var dashboardPolicyVersion = String(app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "未记录");
         components = components.map(function (component) {
           var normalized = policyClone(component);
           normalized.history = (Array.isArray(component.history) ? component.history : []).map(function (point) {
@@ -12412,16 +12412,16 @@
           : availableDimensions.slice();
         app.dimensionTrendDimensions = selectedDimensions;
         var historyVersions = dimensionTrendHistoryVersions(components.concat([overallComponent]));
-        var selectedVersion = String(app.dimensionTrendVersion || historyVersions[historyVersions.length - 1] || "v1.0");
+        var selectedVersion = String(app.dimensionTrendVersion || historyVersions[historyVersions.length - 1] || "未记录");
         if (selectedVersion !== "all" && historyVersions.indexOf(selectedVersion) < 0) {
-          selectedVersion = historyVersions[historyVersions.length - 1] || "v1.0";
+          selectedVersion = historyVersions[historyVersions.length - 1] || "未记录";
         }
         app.dimensionTrendVersion = selectedVersion;
         var selectedThresholds = Object.create(null);
         components.forEach(function (component) {
           if (selectedVersion !== "all") {
             (component.history || []).some(function (point) {
-              if (String(point.policy_version || "v1.0") !== selectedVersion || !point.band_thresholds) return false;
+              if (String(point.policy_version || "未记录") !== selectedVersion || !point.band_thresholds) return false;
               selectedThresholds[component.dimension] = point.band_thresholds;
               return true;
             });
@@ -12432,7 +12432,7 @@
         var selectedOverallThresholds = null;
         if (selectedVersion !== "all") {
           var selectedOverallPoint = (Array.isArray(health.history) ? health.history : []).slice().reverse().find(function (point) {
-            return point && String(point.policy_version || "v1.0") === selectedVersion &&
+            return point && String(point.policy_version || "未记录") === selectedVersion &&
               validDimensionTrendThresholds(point.band_thresholds);
           });
           if (selectedOverallPoint) {
@@ -13539,11 +13539,11 @@
           return item && item.value !== "" && item.value != null && Number.isFinite(Number(item.value));
         }) : [];
         var history = sourceHistory.filter(function (item) {
-          return requestedVersion === "all" || String(item.policy_version || "v1.0") === requestedVersion;
+          return requestedVersion === "all" || String(item.policy_version || "未记录") === requestedVersion;
         });
         var isCurrentOnly = sourceHistory.length === 0;
         var currentPolicyVersion = String(
-          metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "v1.0"
+          metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "未记录"
         );
         if (
           isCurrentOnly &&
@@ -13566,12 +13566,12 @@
         if (requestedVersion === "all") return [];
         var versionRulePoint = (Array.isArray(history) ? history : []).slice().reverse().find(function (item) {
           return item &&
-            String(item.policy_version || "v1.0") === requestedVersion &&
+            String(item.policy_version || "未记录") === requestedVersion &&
             item.policy_rule && typeof item.policy_rule === "object";
         });
         var rule = versionRulePoint && versionRulePoint.policy_rule;
         var currentVersion = String(
-          metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "v1.0"
+          metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "未记录"
         );
         if (!rule && requestedVersion === currentVersion) {
           var technical = metric.technical && typeof metric.technical === "object" ? metric.technical : {};
@@ -13659,7 +13659,7 @@
             healthBand: ["red", "yellow", "green"].indexOf(String(item.health_band || "").toLowerCase()) >= 0
               ? String(item.health_band).toLowerCase()
               : "unknown",
-            policyVersion: String(item.policy_version || "v1.0")
+            policyVersion: String(item.policy_version || "未记录")
           };
         });
         var linePoints = points.map(function (point) {
@@ -13822,7 +13822,7 @@
         tooltip.innerHTML = '<strong>' + escapeHtml(point.getAttribute("data-date") || "-") + '</strong>' +
           '<span>指标值<b>' + escapeHtml(point.getAttribute("data-value") || "-") + '</b></span>' +
           '<span>当日状态<b>' + escapeHtml(point.getAttribute("data-band-label") || "待判定") + '</b></span>' +
-          '<span>阈值版本<b>' + escapeHtml(point.getAttribute("data-policy-version") || "v1.0") + '</b></span>';
+          '<span>阈值版本<b>' + escapeHtml(point.getAttribute("data-policy-version") || "未记录") + '</b></span>';
         tooltip.hidden = false;
         positionMetricHistoryTooltip(event, point);
       }
@@ -13858,12 +13858,12 @@
       function metricHistoryVersions(metric) {
         var versions = [];
         (Array.isArray(metric.history) ? metric.history : []).forEach(function (item) {
-          var version = String(item && item.policy_version || "v1.0");
+          var version = String(item && item.policy_version || "未记录");
           if (versions.indexOf(version) < 0) versions.push(version);
         });
         if (!versions.length) {
           versions.push(String(
-            metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "v1.0"
+            metric.policy_version || app.dashboard && app.dashboard.health_policy && app.dashboard.health_policy.version || "未记录"
           ));
         }
         versions.sort(function (left, right) {
@@ -13874,7 +13874,7 @@
 
       function metricLatestHistoryVersion(metric) {
         var versions = metricHistoryVersions(metric);
-        return versions[versions.length - 1] || "v1.0";
+        return versions[versions.length - 1] || "未记录";
       }
 
       function metricHistoryVersionOptions(metric, selectedVersion) {
@@ -17687,7 +17687,7 @@
           selectedRun.policy_version ||
           policy.draft && policy.draft.base_version ||
           policy.effective_version && policy.effective_version.version ||
-          "v1.0"
+          "未发布"
         );
         var frozenRules = policy.frozen_policy && Array.isArray(policy.frozen_policy.rules)
           ? policy.frozen_policy.rules

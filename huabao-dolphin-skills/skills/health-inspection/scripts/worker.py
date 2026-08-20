@@ -363,7 +363,6 @@ def execute_stage0(
     client.put_text(binding, "data_layer_taskbook", taskbook)
     client.put_json(binding, "data_layer_packet", packet)
     client.put_json(binding, "data_layer_source", source)
-    client.put_json(binding, "data_layer_health_policy", policy)
     client.put_json(binding, "data_layer_facts", facts)
     client.put_json(binding, "data_layer_evidence_catalog", evidence_catalog)
     completed_at = str(binding.platform_release["bound_at"])

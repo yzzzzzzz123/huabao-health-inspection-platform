@@ -1,9 +1,10 @@
 # Huabao Worktree Server
 
-This repository is the trusted deterministic storage and lifecycle boundary for
-Huabao health-inspection workspaces. It is an independent Git root. It does not
-contain or execute Dolphin agents, prompts, schemas, business calculation code,
-or workflow scheduling decisions.
+This component is the trusted deterministic storage and lifecycle boundary for
+Huabao health-inspection workspaces. It lives under the single parent monorepo
+Git root; it is an independently deployable service, not an independent Git
+repository. The sibling Dolphin component owns agents, prompts, schemas,
+business calculation code, and workflow decisions.
 
 ## Fixed scope
 
@@ -12,6 +13,8 @@ or workflow scheduling decisions.
 - Dimensions: traffic, conversion, and product only.
 - Daily identity: `hi-YYYY-MM-DD`, `worktrees/YYYY-MM-DD`, and
   `run/health-inspection/daily/YYYY-MM-DD`.
+- The paths above are relative to the parent monorepo root. Every daily linked
+  worktree is a complete monorepo snapshot containing both component trees.
 - At most one non-terminal workspace may exist at a time and at most one
   workspace may exist for a business date.
 - Python is `>=3.11` and runtime dependencies are standard-library only.
@@ -55,9 +58,22 @@ or workflow scheduling decisions.
 - Delete first closes writes, then removes the exact archive, Git worktree,
   daily branch, and SQLite run. Any residue keeps the run in deleting state.
 
+## Source and deployment boundary
+
+- Git, SQLite common-dir state, snapshot commits, linked worktrees, branches,
+  and archives are rooted at the parent monorepo. Component-relative paths are
+  used only for Server assets and `shared/.env`.
+- A Server deployment must retain a full monorepo checkout or controlled mirror
+  on the host. Packaging only this directory is unsupported because the Server
+  must create full-project linked worktrees.
+- Dolphin may be packaged and uploaded independently from the sibling component,
+  but its release hashes must bind the same immutable source snapshot.
+
 ## Editing and verification
 
-- Never write into the Dolphin repository or the legacy source repository.
+- Do not change the sibling Dolphin component for a Server-only change. A true
+  cross-component contract change must update both components in one monorepo
+  commit. Never write into the legacy source repository.
 - Do not add runtime dependencies or a second environment file.
 - Do not create a `tests/` directory; use system-temporary smoke fixtures.
 - Use direct argv and `shell=False` for Git/Python subprocesses.

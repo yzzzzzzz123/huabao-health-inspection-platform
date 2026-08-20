@@ -1,10 +1,17 @@
 # Huabao Worktree Server
 
-The Worktree Server is the trusted half of the split Huabao health-inspection
+The Worktree Server is the trusted service half of the Huabao health-inspection
 platform. Dolphin owns agents, taskbooks, prompts, schemas, business Python,
-and the Stage 0-5 workflow. This repository owns the HTML shell, Workspace API,
+and the Stage 0-5 workflow. This component owns the HTML shell, Workspace API,
 daily Git linked worktrees, SQLite identity/state, sealing, long-term business
 archives, scheduling infrastructure, and filesystem/security boundaries.
+
+Source control uses one parent monorepo Git root. This directory is an
+independently deployable component, not a nested repository. A Server host must
+retain a complete monorepo checkout or controlled mirror so each daily linked
+worktree contains both this component and `huabao-dolphin-skills/`. Deploying a
+Server-only source copy cannot satisfy that snapshot contract and must fail
+closed.
 
 ## Migration provenance
 
@@ -15,20 +22,23 @@ working tree was clean or byte-identical to that commit. The initial baseline
 content SHA-256 is
 `c224aa3a00e9a362f3597d68c1dc5365c207945cb323522c7fcf284d2c11a059`.
 
-The server implementation in this repository is subsequently maintained as an
-independent Git history. The legacy repository is not a runtime dependency and
-must remain untouched.
+The original Server history was imported into the parent monorepo without
+squashing, so its old commits remain reachable. New changes are maintained in
+the single monorepo history. The legacy source repository is not a runtime
+dependency and must remain untouched.
 
 ## Runtime contract
 
 - Python `>=3.11`, standard library only.
 - Loopback HTTP binding only (default `127.0.0.1:8765`).
-- One tracked environment contract: `shared/.env`.
-- One SQLite control-plane index: `.huabao/workspace-state.sqlite3` (ignored).
-- Daily worktrees: `worktrees/YYYY-MM-DD` (ignored by the main worktree).
-- Sealed business archives: `history/YYYY-MM-DD` (ignored by Git).
+- One tracked Server environment contract: `shared/.env`.
+- One SQLite control-plane index at the monorepo root:
+  `.huabao/workspace-state.sqlite3` (ignored).
+- Complete-monorepo daily worktrees at parent-root
+  `worktrees/YYYY-MM-DD` (ignored by the main worktree).
+- Sealed business archives at parent-root `history/YYYY-MM-DD` (ignored by Git).
 
-Every daily worktree also contains ignored machine-local directories
+Every complete-monorepo daily worktree also contains ignored machine-local directories
 `.runtime/environment` and `.runtime/dingtalk/{receipts,locks}`. The
 `environment/venv.json` receipt records that Agent execution is hosted by
 Dolphin, so an Agent virtual environment is not materialized in the Server
@@ -57,7 +67,7 @@ orphaned daily worktree or claiming a workflow that cannot be supervised.
 
 ## API
 
-Start locally:
+Start locally from this component directory within the full monorepo checkout:
 
 ```text
 python -I skills/health-inspection/scripts/server.py serve
@@ -123,11 +133,16 @@ safe deletion receipt. Run creation, retry, action-note mutation, and active-run
 deletion still fail closed until the trusted Dolphin Gateway, cancel
 acknowledgement, and mutable note store are deployed.
 
-The ignored policy database is initialized explicitly; server startup never
-reads the legacy repository. A one-time migration validates the legacy Git
-identity, reads only regular files, takes two stable SHA-256 snapshots, verifies
-the immutable version and selection hash chains, and imports only into an empty
-target database:
+On a clean installation, Server startup creates only the fixed 37-metric catalog
+and an unpublished editable draft. Every metric threshold starts unconfigured,
+there is no built-in or automatically published `v1.0`, and workspace creation
+fails closed until an operator completes the draft and explicitly publishes the
+first version. Dolphin never supplies a fallback policy.
+
+The Server never reads the legacy repository at runtime. An optional one-time
+migration validates the legacy Git identity, reads only regular files, takes two
+stable SHA-256 snapshots, verifies the immutable version and selection hash
+chains, and imports only into an empty target database:
 
 ```text
 python -I skills/health-inspection/scripts/policy_migration.py import-legacy \
@@ -136,7 +151,7 @@ python -I skills/health-inspection/scripts/policy_migration.py import-legacy \
 python -I skills/health-inspection/scripts/policy_migration.py status
 ```
 
-The current workstation migration binds four versions, draft revision 28 and
+The current workstation's optional migration binds four versions, draft revision 28 and
 37 metric rules to bundle SHA-256
 `47f0feb606dcc253566eeb6d666a583e0e10c56b61c37c64f5161427caa32b0f`.
 
@@ -240,6 +255,6 @@ python -I skills/health-inspection/scripts/worktree_cli.py list
 python -I skills/health-inspection/scripts/state_store_cli.py integrity
 ```
 
-The root worktree may contain tracked, dirty, and non-ignored untracked source.
+The monorepo main worktree may contain tracked, dirty, and non-ignored untracked source.
 Workspace creation snapshots those bytes through an isolated Git index and
 `commit-tree`; it does not alter the main index or main branch.

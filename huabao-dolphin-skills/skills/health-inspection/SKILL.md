@@ -15,6 +15,9 @@ description: Run or resume Huabao New Energy's fixed-scope site health inspectio
 - Workspace Server 负责日期身份、持久化、调度、封存、归档、删除和实际通知。
 - 所有工作区读写必须使用合同 artifact ID，并绑定 run_id、incarnation_id 和
   platform_release_sha256；不得接受任意服务器路径。
+- Server 必须在创建 workspace 时写入 `data_layer_health_policy`。Dolphin 只读并校验
+  artifact 字节 SHA、`published_sha256` 与完整运行政策 `sha256`；不得生成、回退或
+  上传默认 v1.0，fixture 也无绕过。缺失或不一致时在任何 Stage 写入前失败关闭。
 - Agent 不持有宿主凭据、任意命令、存储控制或通知投递能力。
 
 ## 执行顺序与门禁

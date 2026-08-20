@@ -26,12 +26,13 @@ from typing import Any, Iterator, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
+SERVER_ROOT = SCRIPT_DIR.parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
 
 import sys
 
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -43,6 +44,11 @@ from shared.runtime_env import (  # noqa: E402
     load_workspace_config,
 )
 from state_store import StateStore, StateStoreError, canonical_json  # noqa: E402
+from workbench_policy_store import (  # noqa: E402
+    PolicyNotConfiguredError,
+    PolicyStore,
+    PolicyStoreError,
+)
 from worktree_cli import (  # noqa: E402
     GitWorkspaceError,
     branch_exists,
@@ -393,7 +399,17 @@ class ArtifactRegistry:
         roots = document.get("runtime_roots")
         if roots != ["input", "context", "result"]:
             raise WorkspaceAPIError(500, "invalid_contract", "runtime roots are not fixed")
+        source_snapshot = document.get("source_snapshot")
+        if (
+            not isinstance(source_snapshot, dict)
+            or set(source_snapshot) != {"mode", "required_roots"}
+            or source_snapshot.get("mode") != "full_monorepo"
+            or source_snapshot.get("required_roots")
+            != ["huabao-dolphin-skills", "huabao-worktree-server"]
+        ):
+            raise WorkspaceAPIError(500, "invalid_contract", "source snapshot roots are not fixed")
         self.workspace_version = str(document["workspace_version"])
+        self.required_source_roots = tuple(source_snapshot["required_roots"])
         self.contract_sha256 = hashlib.sha256(raw_bytes).hexdigest()
         self.static: dict[str, ArtifactSpec] = {}
         seen_paths: set[str] = set()
@@ -558,15 +574,323 @@ def _parse_json_bytes(value: bytes, *, description: str) -> Any:
 
 
 class WorkspaceService:
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = project_root.resolve()
-        self.config: WorkspaceRuntimeConfig = load_workspace_config(self.project_root)
-        self.registry = ArtifactRegistry(self.project_root / CONTRACT_PATH)
+    def __init__(self, repository_root: Path, *, server_root: Path | None = None) -> None:
+        repository_lexical = Path(os.path.abspath(os.fspath(repository_root)))
+        if (
+            not os.path.lexists(repository_lexical)
+            or _is_link_or_reparse(repository_lexical)
+            or not repository_lexical.is_dir()
+        ):
+            raise WorkspaceAPIError(500, "repository_layout_invalid", "monorepo root is unsafe")
+        self.project_root = repository_lexical.resolve()
+        server_lexical = Path(
+            os.path.abspath(
+                os.fspath(server_root if server_root is not None else self.project_root / "huabao-worktree-server")
+            )
+        )
+        if (
+            not os.path.lexists(server_lexical)
+            or _is_link_or_reparse(server_lexical)
+            or not server_lexical.is_dir()
+        ):
+            raise WorkspaceAPIError(500, "repository_layout_invalid", "Workspace Server root is unsafe")
+        self.server_root = server_lexical.resolve()
+        if (
+            self.server_root.parent != self.project_root
+            or self.server_root.name != "huabao-worktree-server"
+        ):
+            raise WorkspaceAPIError(
+                500,
+                "repository_layout_invalid",
+                "Workspace Server must run from the huabao-health-inspection-platform monorepo",
+            )
+        ensure_git_root(self.project_root)
+        self.config: WorkspaceRuntimeConfig = load_workspace_config(self.server_root)
+        self.registry = ArtifactRegistry(self.server_root / CONTRACT_PATH)
+        self._validate_source_snapshot_roots(self.project_root, require_tracked=True)
+        self.policy_store = PolicyStore(self.project_root)
+        self._initialize_unpublished_policy_draft()
         self.store = StateStore(self.project_root)
         self.worktrees_root = self._server_owned_root("worktrees")
         self.history_root = self._server_owned_root("history")
         self._lock = threading.RLock()
-        ensure_git_root(self.project_root)
+
+    def _validate_source_snapshot_roots(self, root: Path, *, require_tracked: bool) -> None:
+        resolved_root = root.resolve()
+        for name in self.registry.required_source_roots:
+            candidate = resolved_root / name
+            if (
+                candidate.parent != resolved_root
+                or not os.path.lexists(candidate)
+                or _is_link_or_reparse(candidate)
+                or not candidate.is_dir()
+                or candidate.resolve() != candidate
+            ):
+                raise WorkspaceAPIError(
+                    500,
+                    "repository_layout_invalid",
+                    f"required source root is missing or unsafe: {name}",
+                )
+            if require_tracked:
+                tracked = run_git(resolved_root, ["ls-files", "--", name]).stdout
+                if not any(line.strip() for line in tracked.splitlines()):
+                    raise WorkspaceAPIError(
+                        500,
+                        "repository_layout_invalid",
+                        f"required source root has no tracked files: {name}",
+                    )
+
+    @staticmethod
+    def _equal_percentages(identifiers: Sequence[str]) -> dict[str, int]:
+        if not identifiers:
+            raise WorkspaceAPIError(500, "policy_template_invalid", "policy group is empty")
+        quotient, remainder = divmod(100, len(identifiers))
+        return {
+            identifier: quotient + int(index < remainder)
+            for index, identifier in enumerate(identifiers)
+        }
+
+    @staticmethod
+    def _tracked_json(path: Path, *, description: str) -> dict[str, Any]:
+        if _is_link_or_reparse(path) or not path.is_file():
+            raise WorkspaceAPIError(500, "policy_template_invalid", f"{description} is unsafe")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise WorkspaceAPIError(
+                500,
+                "policy_template_invalid",
+                f"{description} is unreadable",
+            ) from exc
+        if not isinstance(value, dict):
+            raise WorkspaceAPIError(
+                500,
+                "policy_template_invalid",
+                f"{description} must be a JSON object",
+            )
+        return value
+
+    def _initialize_unpublished_policy_draft(self) -> None:
+        data_root = self.project_root / "huabao-dolphin-skills" / "shared" / "data"
+        catalog = self._tracked_json(
+            data_root / "metric_catalog.json",
+            description="metric catalog",
+        )
+        runtime = self._tracked_json(
+            data_root / "metric_runtime_policy.json",
+            description="metric runtime policy",
+        )
+        fixture_by_id: dict[str, dict[str, Any]] = {}
+        for dimension in ("traffic", "conversion", "product"):
+            fixture = self._tracked_json(
+                data_root / "fixtures" / f"{dimension}.json",
+                description=f"{dimension} fixture",
+            )
+            metrics = fixture.get("metrics")
+            if not isinstance(metrics, list):
+                raise WorkspaceAPIError(500, "policy_template_invalid", "fixture metrics are invalid")
+            for raw in metrics:
+                if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+                    raise WorkspaceAPIError(500, "policy_template_invalid", "fixture metric is invalid")
+                if raw["id"] in fixture_by_id:
+                    raise WorkspaceAPIError(500, "policy_template_invalid", "fixture metric is duplicated")
+                fixture_by_id[raw["id"]] = dict(raw)
+        runtime_metrics = runtime.get("metrics")
+        catalog_metrics = catalog.get("metrics")
+        if not isinstance(runtime_metrics, list) or not isinstance(catalog_metrics, list):
+            raise WorkspaceAPIError(500, "policy_template_invalid", "metric source lists are invalid")
+        runtime_by_id = {
+            str(item.get("id")): dict(item)
+            for item in runtime_metrics
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        rules: list[dict[str, Any]] = []
+        for raw in catalog_metrics:
+            if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+                raise WorkspaceAPIError(500, "policy_template_invalid", "catalog metric is invalid")
+            metric_id = raw["id"]
+            runtime_metric = runtime_by_id.get(metric_id)
+            fixture_metric = fixture_by_id.get(metric_id)
+            if runtime_metric is None or fixture_metric is None:
+                raise WorkspaceAPIError(500, "policy_template_invalid", "metric sources are incomplete")
+            favorable = str(fixture_metric.get("favorable") or "stable")
+            rule_type = "upper_bound" if favorable == "down" else "lower_bound"
+            threshold_fields = (
+                ["green_max", "yellow_max"]
+                if rule_type == "upper_bound"
+                else ["yellow_min", "green_min"]
+            )
+            evaluation_status = str(
+                runtime_metric.get("evaluation_status") or "monitor_only"
+            )
+            rules.append(
+                {
+                    "metric_id": metric_id,
+                    "position": int(raw["position"]),
+                    "dimension": str(raw["dimension"]),
+                    "dimension_label": str(raw["dimension_label"]),
+                    "name": str(raw["name"]),
+                    "description": str(raw["definition"]).strip(),
+                    "frequency": str(runtime_metric["frequency"]),
+                    "primary_output": str(runtime_metric["primary_output"]),
+                    "format": str(fixture_metric.get("format") or "number"),
+                    "precision": int(fixture_metric.get("decimals") or 0),
+                    "favorable": favorable,
+                    "source": str(fixture_metric["source"]),
+                    "baseline": fixture_metric.get("baseline"),
+                    "rule_type": rule_type,
+                    "threshold_fields": threshold_fields,
+                    "legacy_evaluation_status": evaluation_status,
+                    "legacy_alert_rule": runtime_metric.get("active_alert_rule"),
+                    "thresholds": None,
+                    "classification_enabled": False,
+                    "evaluation_status": evaluation_status,
+                }
+            )
+        ordered = sorted(rules, key=lambda item: int(item["position"]))
+        metric_ids = {
+            dimension: [
+                str(item["metric_id"])
+                for item in ordered
+                if item["dimension"] == dimension
+            ]
+            for dimension in ("traffic", "conversion", "product")
+        }
+        scoring = {
+            "dimension_weight_percentages": {
+                "traffic": 34,
+                "conversion": 33,
+                "product": 33,
+            },
+            "metric_weight_percentages": {
+                metric_id: percentage
+                for dimension in ("traffic", "conversion", "product")
+                for metric_id, percentage in self._equal_percentages(
+                    metric_ids[dimension]
+                ).items()
+            },
+            "band_thresholds": {"yellow_min": 60, "green_min": 80},
+            "dimension_band_thresholds": {
+                dimension: {"yellow_min": 60, "green_min": 80}
+                for dimension in ("traffic", "conversion", "product")
+            },
+        }
+        template = {
+            "rules": ordered,
+            "scoring_config": scoring,
+            "inspection_schedule": {"time": "09:00"},
+        }
+        self.policy_store.initialize_unpublished_draft(
+            ordered,
+            scoring_config=scoring,
+            inspection_schedule={"time": "09:00"},
+            template_sha256=_sha256(canonical_json(template).encode("utf-8")),
+        )
+
+    def _validate_dolphin_release_snapshot(
+        self,
+        worktree: Path,
+        *,
+        platform_release: Mapping[str, Any],
+    ) -> None:
+        dolphin_root = worktree / "huabao-dolphin-skills"
+        release_roots = (
+            dolphin_root / "shared",
+            dolphin_root / "skills" / "health-inspection",
+            dolphin_root / "dolphin" / "agents",
+            dolphin_root / "dolphin" / "workflows",
+        )
+        ignored_parts = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+        }
+        files: list[Path] = []
+        for root in release_roots:
+            if _is_link_or_reparse(root) or not root.is_dir():
+                raise WorkspaceAPIError(
+                    409,
+                    "dolphin_release_mismatch",
+                    "Dolphin release root is missing or unsafe",
+                )
+            for path in root.rglob("*"):
+                if any(part in ignored_parts for part in path.parts):
+                    continue
+                if _is_link_or_reparse(path):
+                    raise WorkspaceAPIError(
+                        409,
+                        "dolphin_release_mismatch",
+                        "Dolphin release bundle cannot contain filesystem links",
+                    )
+                if path.is_dir() or path.suffix in {".pyc", ".pyo"}:
+                    continue
+                if not path.is_file():
+                    raise WorkspaceAPIError(
+                        409,
+                        "dolphin_release_mismatch",
+                        "Dolphin release bundle contains an unsupported filesystem entry",
+                    )
+                files.append(path)
+        files = sorted(
+            set(files),
+            key=lambda item: item.relative_to(dolphin_root).as_posix(),
+        )
+        if not files:
+            raise WorkspaceAPIError(
+                409,
+                "dolphin_release_mismatch",
+                "Dolphin release bundle is empty",
+            )
+        entries = []
+        for path in files:
+            content = path.read_bytes()
+            entries.append(
+                {
+                    "path": path.relative_to(dolphin_root).as_posix(),
+                    "bytes": len(content),
+                    "sha256": _sha256(content),
+                }
+            )
+        skill_sha256 = _sha256(canonical_json(entries).encode("utf-8"))
+        schema_prefix = PurePosixPath(
+            "skills/health-inspection/contracts/schemas"
+        )
+        schema_entries = [
+            entry
+            for entry in entries
+            if schema_prefix in PurePosixPath(str(entry["path"])).parents
+        ]
+        schema_sha256 = _sha256(canonical_json(schema_entries).encode("utf-8"))
+        package = self._tracked_json(
+            dolphin_root / "dolphin" / "package-manifest.json",
+            description="Dolphin package manifest",
+        )
+        expected = {
+            "package_id": platform_release["application_id"],
+            "platform": platform_release["platform"],
+            "release_version": platform_release["release_version"],
+            "workflow_version": platform_release["workflow_version"],
+            "skill_bundle_sha256": skill_sha256,
+            "schema_bundle_sha256": schema_sha256,
+            "workspace_api_version": self.registry.workspace_version,
+        }
+        if any(package.get(key) != value for key, value in expected.items()):
+            raise WorkspaceAPIError(
+                409,
+                "dolphin_release_mismatch",
+                "Dolphin snapshot, package manifest and platform release differ",
+            )
+        if (
+            platform_release.get("skill_bundle_sha256") != skill_sha256
+            or platform_release.get("schema_bundle_sha256") != schema_sha256
+        ):
+            raise WorkspaceAPIError(
+                409,
+                "dolphin_release_mismatch",
+                "Dolphin snapshot hash is not registered for this release",
+            )
 
     def _server_owned_root(self, name: str) -> Path:
         root = self.project_root / name
@@ -1054,6 +1378,30 @@ class WorkspaceService:
         git_created = False
         with self._lock:
             try:
+                try:
+                    runtime_policy = self.policy_store.runtime_policy_for_launch()
+                except PolicyNotConfiguredError as exc:
+                    raise WorkspaceAPIError(
+                        409,
+                        "policy_version_required",
+                        "configure and publish a health-policy version before creating a workspace",
+                    ) from exc
+                except PolicyStoreError as exc:
+                    raise WorkspaceAPIError(
+                        503,
+                        "policy_store_unavailable",
+                        "health-policy binding is unavailable",
+                    ) from exc
+                provisional.update(
+                    {
+                        "policy_version": runtime_policy["version"],
+                        "published_policy_sha256": runtime_policy["published_sha256"],
+                        "runtime_policy_sha256": runtime_policy["sha256"],
+                        "policy_activation_mode": str(
+                            runtime_policy.get("activation_mode") or "scheduled"
+                        ),
+                    }
+                )
                 with self.store.transaction() as connection:
                     if self.store.get_run_by_business_date(business_date, connection=connection):
                         raise WorkspaceAPIError(409, "business_date_exists", "business date already exists")
@@ -1081,7 +1429,13 @@ class WorkspaceService:
                         incarnation_id=incarnation_id,
                         event_type="workspace_creating",
                         occurred_at=created_at,
-                        payload={"release_id": release.release_id, "platform_release_sha256": release_sha256},
+                        payload={
+                            "release_id": release.release_id,
+                            "platform_release_sha256": release_sha256,
+                            "policy_version": runtime_policy["version"],
+                            "published_policy_sha256": runtime_policy["published_sha256"],
+                            "runtime_policy_sha256": runtime_policy["sha256"],
+                        },
                     )
                     base_commit = create_linked_worktree(
                         self.project_root,
@@ -1091,6 +1445,11 @@ class WorkspaceService:
                         worktree_path=worktree,
                     )
                     git_created = True
+                    self._validate_source_snapshot_roots(worktree, require_tracked=True)
+                    self._validate_dolphin_release_snapshot(
+                        worktree,
+                        platform_release=platform_release,
+                    )
                     self.store.update_run(connection, run_id, base_commit=base_commit)
                     run = self._run_or_404(run_id, connection=connection)
                     self._initialize_runtime_receipts(
@@ -1107,6 +1466,13 @@ class WorkspaceService:
                         content=platform_release_bytes,
                         media_type="application/json",
                     )
+                    self._record_server_artifact(
+                        connection,
+                        run=run,
+                        artifact_id="data_layer_health_policy",
+                        content=_pretty_json_bytes(runtime_policy),
+                        media_type="application/json",
+                    )
                     run_context = {
                         "schema_version": "1.0",
                         "workspace_version": self.registry.workspace_version,
@@ -1116,6 +1482,11 @@ class WorkspaceService:
                         "base_commit": base_commit,
                         "platform_release_sha256": release_sha256,
                         "created_at": created_at,
+                        "health_policy": {
+                            "version": runtime_policy["version"],
+                            "published_sha256": runtime_policy["published_sha256"],
+                            "runtime_sha256": runtime_policy["sha256"],
+                        },
                         "scope": {
                             "timezone": "Asia/Shanghai",
                             "currency": "CNY",
@@ -1628,7 +1999,55 @@ class WorkspaceService:
         spec = self.registry.resolve(artifact_id)
         return _parse_json_bytes(self._artifact_source(run, spec).read_bytes(), description=artifact_id)
 
-    def _validate_facts(self, run: Mapping[str, Any], facts: Any) -> None:
+    def _validate_facts(
+        self,
+        run: Mapping[str, Any],
+        facts: Any,
+        frozen_policy: Any,
+    ) -> None:
+        if not isinstance(frozen_policy, dict):
+            raise WorkspaceAPIError(
+                422,
+                "health_policy_invalid",
+                "frozen health policy must be an object",
+            )
+        policy_hash = frozen_policy.get("sha256")
+        unhashed_policy = dict(frozen_policy)
+        unhashed_policy.pop("sha256", None)
+        if (
+            not isinstance(policy_hash, str)
+            or SHA256_RE.fullmatch(policy_hash) is None
+            or not hmac.compare_digest(
+                policy_hash,
+                _sha256(canonical_json(unhashed_policy).encode("utf-8")),
+            )
+        ):
+            raise WorkspaceAPIError(
+                422,
+                "health_policy_hash_invalid",
+                "frozen health policy self-hash is invalid",
+            )
+        policy_activation_mode = str(
+            frozen_policy.get("activation_mode") or "scheduled"
+        )
+        expected_run_binding = {
+            "version": run.get("policy_version"),
+            "published_sha256": run.get("published_policy_sha256"),
+            "sha256": run.get("runtime_policy_sha256"),
+            "activation_mode": run.get("policy_activation_mode"),
+        }
+        actual_run_binding = {
+            "version": frozen_policy.get("version"),
+            "published_sha256": frozen_policy.get("published_sha256"),
+            "sha256": policy_hash,
+            "activation_mode": policy_activation_mode,
+        }
+        if expected_run_binding != actual_run_binding:
+            raise WorkspaceAPIError(
+                409,
+                "health_policy_binding_mismatch",
+                "frozen health policy differs from the durable run binding",
+            )
         if not isinstance(facts, dict):
             raise WorkspaceAPIError(422, "facts_invalid", "facts must be an object")
         if facts.get("run_id") != run["run_id"] or facts.get("business_date") != run["business_date"]:
@@ -1656,6 +2075,20 @@ class WorkspaceService:
         catalog = facts.get("metric_catalog")
         if not isinstance(catalog, dict) or catalog.get("metric_count") != 37:
             raise WorkspaceAPIError(422, "facts_catalog_count", "metric catalog count must be 37")
+        expected_facts_binding = {
+            "version": frozen_policy.get("version"),
+            "published_sha256": frozen_policy.get("published_sha256"),
+            "sha256": policy_hash,
+            "effective_at": frozen_policy.get("effective_at"),
+            "mode": frozen_policy.get("mode"),
+            "activation_mode": policy_activation_mode,
+        }
+        if facts.get("health_policy") != expected_facts_binding:
+            raise WorkspaceAPIError(
+                409,
+                "facts_policy_binding_mismatch",
+                "facts health-policy projection differs from the frozen policy",
+            )
 
     @staticmethod
     def _validate_attempt_receipt(artifact_id: str, value: Any) -> None:
@@ -1680,8 +2113,16 @@ class WorkspaceService:
     ) -> dict[str, Mapping[str, Any]]:
         artifacts_by_id = {str(item["artifact_id"]): item for item in artifacts}
         missing = []
+        generated_during_seal = {
+            "orchestrator_workspace_index",
+            "orchestrator_archive_manifest",
+        }
         for spec in self.registry.static.values():
-            if spec.required and spec.writer == "dolphin" and spec.artifact_id not in artifacts_by_id:
+            if (
+                spec.required
+                and spec.artifact_id not in generated_during_seal
+                and spec.artifact_id not in artifacts_by_id
+            ):
                 missing.append(spec.artifact_id)
         receipt_ids: list[str] = []
         for pattern in self.registry.required_attempt_receipts:
@@ -1698,7 +2139,16 @@ class WorkspaceService:
                 details={"artifact_ids": sorted(missing)},
             )
         self._verify_indexed_files(run, artifacts)
-        self._validate_facts(run, self._load_json_artifact(run, artifacts_by_id, "data_layer_facts"))
+        frozen_policy = self._load_json_artifact(
+            run,
+            artifacts_by_id,
+            "data_layer_health_policy",
+        )
+        self._validate_facts(
+            run,
+            self._load_json_artifact(run, artifacts_by_id, "data_layer_facts"),
+            frozen_policy,
+        )
         for receipt_id in receipt_ids:
             self._validate_attempt_receipt(
                 receipt_id,

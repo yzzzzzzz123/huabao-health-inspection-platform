@@ -1,8 +1,9 @@
 """Pure health-policy validation and bounded runtime projections.
 
-Policy version selection, activation claims, scheduling, and durable storage
-belong to the Worktree Server. Dolphin receives or creates one immutable policy
-artifact and uses only the projections defined here.
+Policy version selection, activation claims, scheduling, durable storage, and
+runtime-policy materialization belong to the Worktree Server. Dolphin only
+reads and validates the immutable workspace artifact, then uses the bounded
+projections defined here.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ ACTIVATION_MODES = {"scheduled", "next_inspection"}
 POLICY_MODES = {"legacy", "thresholds"}
 VERSION_RE = re.compile(r"^v1\.[0-9]+$")
 METRIC_ID_RE = re.compile(r"^HI-[0-9]{3}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class PolicyValidationError(ValueError):
@@ -96,6 +98,14 @@ def validate_frozen_policy(document: Mapping[str, Any]) -> dict[str, Any]:
         raise PolicyValidationError("invalid policy version")
     if value.get("mode") not in POLICY_MODES:
         raise PolicyValidationError("policy mode must be legacy or thresholds")
+    published_sha256 = value.get("published_sha256")
+    if (
+        not isinstance(published_sha256, str)
+        or SHA256_RE.fullmatch(published_sha256) is None
+    ):
+        raise PolicyValidationError(
+            "published policy SHA-256 must be 64 lowercase hexadecimal characters"
+        )
     policy_activation_mode(value)
     schedule = value.get("inspection_schedule")
     if (
@@ -119,7 +129,11 @@ def validate_frozen_policy(document: Mapping[str, Any]) -> dict[str, Any]:
                 raise PolicyValidationError(
                     f"{rule['metric_id']}: thresholds are required"
                 )
-    recorded = str(value.get("sha256") or "")
+    recorded = value.get("sha256")
+    if not isinstance(recorded, str) or SHA256_RE.fullmatch(recorded) is None:
+        raise PolicyValidationError(
+            "runtime policy SHA-256 must be 64 lowercase hexadecimal characters"
+        )
     unhashed = dict(value)
     unhashed.pop("sha256", None)
     if recorded != sha256_json(unhashed):
@@ -137,7 +151,18 @@ def policy_evaluation_coverage(document: Mapping[str, Any]) -> dict[str, int]:
     }
     active = 0
     for rule in rules:
-        status = str(rule.get("evaluation_status") or "monitor_only")
+        status = str(
+            rule.get(
+                "evaluation_status"
+                if mode == "thresholds"
+                else "legacy_evaluation_status"
+            )
+            or "monitor_only"
+        )
+        if status not in counts:
+            raise PolicyValidationError(
+                f"{rule['metric_id']}: invalid policy evaluation coverage status"
+            )
         counts[status] += 1
         if mode == "thresholds":
             active += int(rule.get("classification_enabled") is True)
@@ -157,6 +182,7 @@ def policy_runtime_gate_projection(
     mode = str(value["mode"])
     return {
         "version": str(value["version"]),
+        "published_sha256": str(value["published_sha256"]),
         "sha256": str(value["sha256"]),
         "effective_at": str(value["effective_at"]),
         "activation_mode": policy_activation_mode(value),
@@ -175,72 +201,9 @@ def policy_runtime_gate_projection(
     }
 
 
-def build_default_frozen_policy() -> dict[str, Any]:
-    """Build the bundled v1.0 policy for the first release and fixture E2E."""
-
-    catalog_path = PROJECT_ROOT / "shared" / "data" / "metric_catalog.json"
-    runtime_path = PROJECT_ROOT / "shared" / "data" / "metric_runtime_policy.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    runtime_by_id = {
-        str(item["id"]): dict(item) for item in runtime.get("metrics", [])
-    }
-    fixture_by_id: dict[str, dict[str, Any]] = {}
-    fixture_root = PROJECT_ROOT / "shared" / "data" / "fixtures"
-    for name in ("traffic", "conversion", "product"):
-        block = json.loads((fixture_root / f"{name}.json").read_text(encoding="utf-8"))
-        fixture_by_id.update(
-            {str(item["id"]): dict(item) for item in block.get("metrics", [])}
-        )
-    rules: list[dict[str, Any]] = []
-    for metric in catalog.get("metrics", []):
-        metric_id = str(metric["id"])
-        runtime_metric = runtime_by_id.get(metric_id)
-        if runtime_metric is None:
-            raise PolicyValidationError(f"{metric_id}: runtime metadata is missing")
-        fixture_metric = fixture_by_id.get(metric_id)
-        if fixture_metric is None:
-            raise PolicyValidationError(f"{metric_id}: fixture metadata is missing")
-        rules.append(
-            {
-                "metric_id": metric_id,
-                "position": int(metric["position"]),
-                "dimension": str(metric["dimension"]),
-                "name": str(metric["name"]),
-                "description": str(metric["definition"]).strip(),
-                "frequency": str(runtime_metric["frequency"]),
-                "primary_output": str(runtime_metric["primary_output"]),
-                "output_keys": list(runtime_metric["output_keys"]),
-                "source": str(fixture_metric["source"]),
-                "format": str(fixture_metric.get("format") or "number"),
-                "precision": int(fixture_metric.get("decimals") or 0),
-                "favorable": str(fixture_metric.get("favorable") or "stable"),
-                "evaluation_status": str(
-                    runtime_metric.get("evaluation_status") or "monitor_only"
-                ),
-                "legacy_evaluation_status": str(
-                    runtime_metric.get("evaluation_status") or "monitor_only"
-                ),
-                "legacy_alert_rule": runtime_metric.get("active_alert_rule"),
-            }
-        )
-    value: dict[str, Any] = {
-        "schema_version": "1.0",
-        "version": "v1.0",
-        "effective_at": "2026-01-01T00:00:00+08:00",
-        "activation_mode": "scheduled",
-        "mode": "legacy",
-        "inspection_schedule": {"time": "09:00"},
-        "rules": rules,
-    }
-    value["sha256"] = sha256_json(value)
-    return validate_frozen_policy(value)
-
-
 __all__ = [
     "METRIC_DESCRIPTION_MAX_LENGTH",
     "PolicyValidationError",
-    "build_default_frozen_policy",
     "policy_activation_mode",
     "policy_evaluation_coverage",
     "policy_runtime_gate_projection",

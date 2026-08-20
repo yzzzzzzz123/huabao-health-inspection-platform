@@ -10,6 +10,10 @@
     "branch_pattern": "run/health-inspection/daily/{business_date}",
     "recreate_requires_complete_daily_deletion": true
   },
+  "source_snapshot": {
+    "mode": "full_monorepo",
+    "required_roots": ["huabao-dolphin-skills", "huabao-worktree-server"]
+  },
   "runtime_roots": ["input", "context", "result"],
   "artifacts": [
     {"id":"platform_release","path":"input/00-orchestrator/platform-release.json","writer":"server","write_mode":"server_create_once","state":["creating","open","sealing","sealed"],"media":["application/json"],"max_bytes":16384,"schema":"inline:platform-release@1.0","required":true,"ui":true,"sensitivity":"internal"},
@@ -22,7 +26,7 @@
     {"id":"data_layer_taskbook","path":"input/00-data-layer/taskbook.md","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["text/markdown"],"max_bytes":1048576,"schema":null,"required":true,"ui":false,"sensitivity":"internal"},
     {"id":"data_layer_packet","path":"input/00-data-layer/packet.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":4194304,"schema":"data-operator-packet.schema.json","required":true,"ui":false,"sensitivity":"restricted"},
     {"id":"data_layer_source","path":"input/00-data-layer/source.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":8388608,"schema":null,"required":true,"ui":false,"sensitivity":"restricted"},
-    {"id":"data_layer_health_policy","path":"input/00-data-layer/health-policy.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":4194304,"schema":null,"required":true,"ui":false,"sensitivity":"internal"},
+    {"id":"data_layer_health_policy","path":"input/00-data-layer/health-policy.json","writer":"server","write_mode":"server_create_once","state":["creating","open","sealing","sealed"],"media":["application/json"],"max_bytes":4194304,"schema":null,"required":true,"ui":false,"sensitivity":"internal"},
     {"id":"data_layer_facts","path":"input/00-data-layer/facts.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":8388608,"schema":"facts.schema.json","required":true,"ui":false,"sensitivity":"business"},
     {"id":"data_layer_evidence_catalog","path":"input/00-data-layer/evidence-catalog.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":16777216,"schema":null,"required":true,"ui":false,"sensitivity":"restricted"},
     {"id":"data_layer_manifest","path":"input/00-data-layer/manifest.json","writer":"dolphin","write_mode":"create_once","state":["open"],"media":["application/json"],"max_bytes":4194304,"schema":null,"required":true,"ui":false,"sensitivity":"internal"},

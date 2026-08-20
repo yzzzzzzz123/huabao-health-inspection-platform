@@ -3,8 +3,9 @@
 The workbench policy database is deliberately separate from workspace state.
 It stores one CAS-protected draft, immutable canonical JSON versions and a
 tamper-evident version-selection ledger.  Runtime code never reads the legacy
-repository: initial data must be supplied explicitly through ``ensure_seed``
-or the one-time ``import_state`` migration boundary.
+repository: a clean installation receives only an unpublished editable draft;
+published history can enter only through operator publication or the explicit
+one-time ``import_state`` migration boundary.
 """
 
 from __future__ import annotations
@@ -109,6 +110,11 @@ class PolicyNotFoundError(WorkbenchPolicyStoreError):
 class PolicyInUseError(WorkbenchPolicyStoreError):
     status = 409
     code = "policy_version_in_use"
+
+
+class PolicyNotConfiguredError(WorkbenchPolicyStoreError):
+    status = 409
+    code = "policy_version_required"
 
 
 def canonical_json(value: Any) -> str:
@@ -944,6 +950,7 @@ class WorkbenchPolicyStore:
         *,
         catalog: Sequence[Mapping[str, Any]],
         version_by_name: Mapping[str, Mapping[str, Any]],
+        allow_incomplete: bool = False,
     ) -> dict[str, Any]:
         if not isinstance(draft, Mapping):
             raise PolicyValidationError("draft must be an object")
@@ -962,12 +969,22 @@ class WorkbenchPolicyStore:
         elif value.get("base_sha256") not in {None, ""}:
             raise PolicyValidationError("draft without a base version cannot bind a SHA-256")
         value["rules"] = self._validate_rules(
-            value.get("rules"), catalog=catalog, allow_missing_thresholds=False
+            value.get("rules"),
+            catalog=catalog,
+            allow_missing_thresholds=allow_incomplete,
         )
-        value["scoring_config"] = self._validate_scoring(
-            value.get("scoring_config"), catalog=catalog
-        )
-        value["inspection_schedule"] = _inspection_schedule(value.get("inspection_schedule"))
+        if allow_incomplete and value.get("scoring_config") is None:
+            value["scoring_config"] = None
+        else:
+            value["scoring_config"] = self._validate_scoring(
+                value.get("scoring_config"), catalog=catalog
+            )
+        if allow_incomplete and value.get("inspection_schedule") is None:
+            value["inspection_schedule"] = None
+        else:
+            value["inspection_schedule"] = _inspection_schedule(
+                value.get("inspection_schedule")
+            )
         if "updated_at" in value:
             _timestamp(value["updated_at"], field="draft.updated_at")
         else:
@@ -1146,106 +1163,79 @@ class WorkbenchPolicyStore:
                 )
         return self.overview()
 
-    def ensure_seed(
+    def initialize_unpublished_draft(
         self,
-        seed: Mapping[str, Any] | None = None,
+        rules: Sequence[Mapping[str, Any]],
         *,
-        version: str | Mapping[str, Any] | None = None,
-        rules: Sequence[Mapping[str, Any]] | None = None,
-        scoring_config: Mapping[str, Any] | None = None,
-        scoring: Mapping[str, Any] | None = None,
-        inspection_schedule: Mapping[str, Any] | str | None = None,
-        schedule: Mapping[str, Any] | str | None = None,
-        effective_at: str | None = None,
-        activation_mode: str = "scheduled",
-        note: str = "Initial workbench policy",
-        trusted_source_sha256: str | None = None,
-    ) -> dict[str, Any]:
-        """Idempotently initialize an empty store from caller-supplied facts."""
+        scoring_config: Mapping[str, Any],
+        inspection_schedule: Mapping[str, Any],
+        template_sha256: str,
+    ) -> bool:
+        """Create only the editable draft/catalog for a clean installation.
 
-        with self.transaction(immediate=False) as connection:
-            initialized = connection.execute(
-                "SELECT 1 FROM policy_state WHERE singleton = 1"
-            ).fetchone()
-        if initialized is not None:
-            return self.overview()
-        raw = _copy(dict(seed or {}))
-        nested = raw.get("version_document")
-        if nested is None and isinstance(raw.get("version"), Mapping):
-            nested = raw["version"]
-        if nested is not None:
-            if not isinstance(nested, Mapping):
-                raise PolicyValidationError("seed version_document must be an object")
-            document = _copy(dict(nested))
-        elif raw.get("rules") is not None and raw.get("sha256") is not None:
-            document = _copy(raw)
-        elif isinstance(version, Mapping):
-            document = _copy(dict(version))
-        else:
-            seed_rules = rules if rules is not None else raw.get("rules")
-            seed_scoring = (
-                scoring_config
-                if scoring_config is not None
-                else scoring
-                if scoring is not None
-                else raw.get("scoring_config")
-                or raw.get("scoring")
-            )
-            seed_schedule = (
-                inspection_schedule
-                if inspection_schedule is not None
-                else schedule
-                if schedule is not None
-                else raw.get("inspection_schedule")
-                or raw.get("schedule")
-            )
-            seed_version = str(version or raw.get("version") or "v1.0")
-            if _version_ordinal(seed_version) != 0:
-                raise PolicyValidationError("a standalone seed must start at v1.0")
-            now = datetime.now(SHANGHAI)
-            document = {
-                "schema_version": POLICY_SCHEMA_VERSION,
-                "version": seed_version,
-                "ordinal": 0,
-                "mode": "thresholds",
-                "activation_mode": activation_mode,
-                "created_at": now.isoformat(timespec="milliseconds"),
-                "effective_at": effective_at or now.isoformat(timespec="minutes"),
-                "note": note,
-                "previous_sha256": "",
-                "rules": _copy(seed_rules),
-                "scoring_config": _copy(seed_scoring),
-                "inspection_schedule": _copy(seed_schedule),
-            }
-            document["sha256"] = self._document_hash(document)
-        draft_value = {
+        This method never inserts ``policy_versions`` or selection events.
+        Thresholds may be absent in the initial draft; first publish remains
+        fail-closed until an operator has completed every metric rule.
+        """
+
+        if SHA256_RE.fullmatch(str(template_sha256)) is None:
+            raise PolicyValidationError("draft template SHA-256 is invalid")
+        catalog_rules = self._validate_catalog_shape(list(rules))
+        catalog = self._catalog_from_rules(catalog_rules)
+        normalized_rules = self._validate_rules(
+            list(rules),
+            catalog=catalog,
+            allow_missing_thresholds=True,
+        )
+        normalized_scoring = self._validate_scoring(scoring_config, catalog=catalog)
+        normalized_schedule = _inspection_schedule(inspection_schedule)
+        draft = {
             "schema_version": DRAFT_SCHEMA_VERSION,
             "draft_revision": 1,
-            "base_version": document.get("version"),
-            "base_sha256": document.get("sha256"),
+            "base_version": None,
+            "base_sha256": None,
             "updated_at": utc_now(),
-            "rules": _copy(document.get("rules")),
-            "scoring_config": _copy(
-                document.get("scoring_config")
-                or scoring_config
-                or scoring
-                or raw.get("scoring_config")
-                or raw.get("scoring")
-            ),
-            "inspection_schedule": _copy(
-                document.get("inspection_schedule")
-                or inspection_schedule
-                or schedule
-                or raw.get("inspection_schedule")
-                or raw.get("schedule")
-            ),
+            "rules": normalized_rules,
+            "scoring_config": normalized_scoring,
+            "inspection_schedule": normalized_schedule,
         }
-        return self.import_state(
-            [document],
-            draft_value,
-            replace_if_empty=True,
-            trusted_source_sha256=trusted_source_sha256,
-        )
+        with self.transaction() as connection:
+            counts = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM policy_versions) AS versions,
+                    (SELECT COUNT(*) FROM policy_version_tombstones) AS tombstones,
+                    (SELECT COUNT(*) FROM policy_state) AS drafts,
+                    (SELECT COUNT(*) FROM selection_events) AS events,
+                    (SELECT COUNT(*) FROM metadata WHERE key = 'metric_catalog') AS catalogs
+                """
+            ).fetchone()
+            if int(counts["drafts"]) == 1 and int(counts["catalogs"]) == 1:
+                stored_template = connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'draft_template_sha256'"
+                ).fetchone()
+                if (
+                    stored_template is not None
+                    and stored_template["value"] != template_sha256
+                ):
+                    raise PolicyConflictError(
+                        "stored unpublished draft template differs from this server release"
+                    )
+                return False
+            if any(int(counts[key]) for key in counts.keys()):
+                raise PolicyConflictError(
+                    "cannot initialize an unpublished draft over partial policy state"
+                )
+            connection.execute(
+                "INSERT INTO metadata(key, value) VALUES('metric_catalog', ?)",
+                (canonical_json(catalog),),
+            )
+            connection.execute(
+                "INSERT INTO metadata(key, value) VALUES('draft_template_sha256', ?)",
+                (template_sha256,),
+            )
+            self._store_draft(connection, draft)
+        return True
 
     @staticmethod
     def _selection_record_hash(record: Mapping[str, Any]) -> str:
@@ -1470,6 +1460,61 @@ class WorkbenchPolicyStore:
                 eligible.append(document)
         return eligible[-1] if eligible else None
 
+    def runtime_policy_for_launch(self) -> dict[str, Any]:
+        """Freeze the selected published version into a self-hashed run policy.
+
+        The published document remains immutable under ``published_sha256``.
+        Runtime inheritance (legacy display rules and the most recent schedule)
+        is materialized before a workspace is created, then the complete object
+        receives its own ``sha256``.  An empty store never invents v1.0.
+        """
+
+        with self.transaction(immediate=False) as connection:
+            catalog = self._catalog(connection)
+            draft = self._read_draft(connection)
+            documents = self._load_version_chain(connection, catalog=catalog)
+            if not documents:
+                raise PolicyNotConfiguredError(
+                    "no published health-policy version exists; configure and publish one first"
+                )
+            selection = self._selection_overview(connection)
+            target: dict[str, Any] | None = None
+            if selection["mode"] == "manual":
+                target = next(
+                    (
+                        item
+                        for item in documents
+                        if item["version"] == selection["selected_version"]
+                        and item["sha256"] == selection["selected_sha256"]
+                    ),
+                    None,
+                )
+                if target is None:
+                    raise PolicyImmutableError(
+                        "selected health-policy version is no longer available"
+                    )
+            else:
+                target = self._effective_document(connection)
+            if target is None:
+                raise PolicyNotConfiguredError(
+                    "no published health-policy version is effective for this inspection"
+                )
+            runtime = self._display_document(
+                connection,
+                target,
+                catalog=catalog,
+                fallback_scoring=draft["scoring_config"],
+            )
+            # Historical versions without a scoring contract must preserve the
+            # true-equal legacy scoring branch in deterministic calculation.
+            if "scoring_config" not in target:
+                runtime.pop("scoring_config", None)
+            published_sha256 = str(target["sha256"])
+            runtime.pop("sha256", None)
+            runtime["published_sha256"] = published_sha256
+            runtime["sha256"] = sha256_json(runtime)
+            return _copy(runtime)
+
     def _commit_draft(
         self,
         connection: sqlite3.Connection,
@@ -1524,6 +1569,8 @@ class WorkbenchPolicyStore:
                 return _copy(draft)
             target["description"] = normalized_description
             target["thresholds"] = normalized_thresholds
+            target["classification_enabled"] = True
+            target["evaluation_status"] = "evaluated"
             return self._commit_draft(connection, draft)
 
     def save_scoring(
@@ -2136,7 +2183,10 @@ class WorkbenchPolicyStore:
             documents = self._load_version_chain(connection, catalog=catalog)
             version_by_name = {str(item["version"]): item for item in documents}
             self._validate_draft(
-                draft, catalog=catalog, version_by_name=version_by_name
+                draft,
+                catalog=catalog,
+                version_by_name=version_by_name,
+                allow_incomplete=True,
             )
             effective = self._effective_document(connection)
             base = self._comparison_document(
@@ -2207,6 +2257,7 @@ __all__ = [
     "PolicyImmutableError",
     "PolicyInUseError",
     "PolicyNotFoundError",
+    "PolicyNotConfiguredError",
     "PolicyStore",
     "PolicyStoreError",
     "PolicyValidationError",

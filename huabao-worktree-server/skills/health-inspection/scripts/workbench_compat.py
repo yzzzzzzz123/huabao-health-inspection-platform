@@ -110,6 +110,8 @@ _PUBLIC_JSON_FIELDS: dict[str, frozenset[str]] = {
             "rules",
             "scoring_config",
             "sha256",
+            "published_sha256",
+            "ordinal",
             "created_at",
             "activated_at",
             "note",
@@ -189,7 +191,14 @@ _PUBLIC_JSON_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 _PUBLIC_POLICY_BINDING_FIELDS = frozenset(
-    {"version", "sha256", "effective_at", "activation_mode", "mode"}
+    {
+        "version",
+        "sha256",
+        "published_sha256",
+        "effective_at",
+        "activation_mode",
+        "mode",
+    }
 )
 _PUBLIC_POLICY_RULE_FIELDS = frozenset(
     {
@@ -663,6 +672,7 @@ def _policy_binding(
     policy = _json_artifact(service, run, "data_layer_health_policy")
     if policy is not None:
         policy_sha = str(policy.get("sha256") or "")
+        published_sha = str(policy.get("published_sha256") or policy_sha)
         binding_sha = str(binding.get("sha256") or "")
         if policy_sha and not _SHA256_RE.fullmatch(policy_sha):
             raise WorkspaceAPIError(
@@ -676,6 +686,26 @@ def _policy_binding(
                 "workbench_policy_binding",
                 "facts and frozen health policy SHA-256 differ",
             )
+        binding_published_sha = str(binding.get("published_sha256") or "")
+        if (
+            published_sha
+            and _SHA256_RE.fullmatch(published_sha) is None
+        ):
+            raise WorkspaceAPIError(
+                409,
+                "workbench_policy_hash_invalid",
+                "published health policy SHA-256 is invalid",
+            )
+        if (
+            binding_published_sha
+            and published_sha
+            and binding_published_sha != published_sha
+        ):
+            raise WorkspaceAPIError(
+                409,
+                "workbench_policy_binding",
+                "facts and published health policy SHA-256 differ",
+            )
         for key in ("version", "effective_at", "activation_mode"):
             if key in binding and key in policy and binding[key] != policy[key]:
                 raise WorkspaceAPIError(
@@ -686,16 +716,48 @@ def _policy_binding(
         if not binding:
             binding = {
                 key: policy.get(key)
-                for key in ("version", "sha256", "effective_at", "activation_mode", "mode")
+                for key in (
+                    "version",
+                    "sha256",
+                    "published_sha256",
+                    "effective_at",
+                    "activation_mode",
+                    "mode",
+                )
             }
     if not binding:
-        binding = {
-            "version": "v1.0",
-            "sha256": "",
-            "effective_at": None,
-            "activation_mode": "scheduled",
-            "mode": "legacy",
+        raise WorkspaceAPIError(
+            409,
+            "workbench_policy_binding",
+            "workspace has no frozen health-policy binding",
+        )
+    durable_binding = {
+        "version": run.get("policy_version"),
+        "published_sha256": run.get("published_policy_sha256"),
+        "sha256": run.get("runtime_policy_sha256"),
+        "activation_mode": run.get("policy_activation_mode"),
+    }
+    durable_values = list(durable_binding.values())
+    if any(value not in {None, ""} for value in durable_values):
+        if not all(value not in {None, ""} for value in durable_values):
+            raise WorkspaceAPIError(
+                409,
+                "workbench_policy_binding",
+                "durable workspace policy binding is incomplete",
+            )
+        normalized_binding = {
+            "version": binding.get("version"),
+            "published_sha256": binding.get("published_sha256"),
+            "sha256": binding.get("sha256"),
+            "activation_mode": binding.get("activation_mode") or "scheduled",
         }
+        if normalized_binding != durable_binding:
+            raise WorkspaceAPIError(
+                409,
+                "workbench_policy_binding",
+                "workspace artifacts differ from the durable policy binding",
+            )
+        binding.update(durable_binding)
     binding_version = str(binding.get("version") or "")
     binding_sha = str(binding.get("sha256") or "")
     if _POLICY_VERSION_RE.fullmatch(binding_version) is None:
@@ -772,7 +834,7 @@ def _dashboard(
                     "label": historical_date[5:].replace("-", "/"),
                     "value": score,
                     "band": historical_health.get("band"),
-                    "policy_version": historical_policy.get("version", "v1.0"),
+                    "policy_version": historical_policy.get("version"),
                     "band_thresholds": (
                         historical_health.get("scoring", {}).get("band_thresholds", {})
                         if isinstance(historical_health.get("scoring"), dict)
@@ -793,7 +855,7 @@ def _dashboard(
                         "label": historical_date[5:].replace("-", "/"),
                         "value": component["score"],
                         "band": component.get("assessment_status"),
-                        "policy_version": historical_policy.get("version", "v1.0"),
+                        "policy_version": historical_policy.get("version"),
                         "band_thresholds": component.get("band_thresholds", {}),
                     }
                 )
@@ -814,7 +876,7 @@ def _dashboard(
                         else None
                     ),
                     "status": metric.get("status"),
-                    "policy_version": historical_policy.get("version", "v1.0"),
+                    "policy_version": historical_policy.get("version"),
                     "policy_rule": (
                         metric.get("technical", {}).get("health_policy_rule")
                         if isinstance(metric.get("technical"), dict)
@@ -825,7 +887,7 @@ def _dashboard(
     for metric in metrics:
         metric_id = str(metric.get("id") or "")
         metric["history"] = history_by_metric.get(metric_id, [])
-        metric.setdefault("policy_version", policy_binding.get("version", "v1.0"))
+        metric.setdefault("policy_version", policy_binding["version"])
         if "health_band" not in metric:
             metric["health_band"] = (
                 "red" if metric.get("status") == "abnormal" else "green"
@@ -945,7 +1007,7 @@ def _dashboard(
             },
             "dimension_kpis": dimension_kpis,
             "note": (
-                f"37 项指标均已接入；本次冻结 {policy_binding.get('version', 'v1.0')}，"
+                f"37 项指标均已接入；本次冻结 {policy_binding['version']}，"
                 f"完整判定 {int(assessment.get('evaluated_count') or 0)} 项，"
                 f"特殊分支判定 {int(assessment.get('partially_evaluated_count') or 0)} 项，"
                 f"持续监测 {int(assessment.get('monitor_only_count') or 0)} 项。"
@@ -1282,7 +1344,7 @@ def _run_summary(service: WorkspaceService, run: Mapping[str, Any]) -> dict[str,
         "health_score": score if isinstance(score, (int, float)) and not isinstance(score, bool) else None,
         "health_band": health.get("band"),
         "dimension_scores": dimension_scores,
-        "policy_version": policy_binding.get("version", "v1.0"),
+        "policy_version": policy_binding["version"],
         "policy_sha256": policy_binding.get("sha256"),
         "band_thresholds": (
             health.get("scoring", {}).get("band_thresholds", {"yellow_min": 60, "green_min": 80})
@@ -1362,7 +1424,9 @@ def runs_page(
 def _policy_options_from_summaries(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     counts: dict[str, int] = {}
     for run in runs:
-        version = str(run.get("policy_version") or "v1.0")
+        version = str(run.get("policy_version") or "")
+        if _POLICY_VERSION_RE.fullmatch(version) is None:
+            continue
         counts[version] = counts.get(version, 0) + 1
     return [
         {"policy_version": version, "run_count": counts[version]}
@@ -1551,7 +1615,7 @@ def snapshot(service: WorkspaceService, run_id: str) -> dict[str, Any]:
         "schema_version": "1.1",
         "run_id": run["run_id"],
         "business_date": run["business_date"],
-        "policy_version": policy_binding.get("version", "v1.0"),
+        "policy_version": policy_binding["version"],
         "policy_sha256": policy_binding.get("sha256"),
         "policy_effective_at": policy_binding.get("effective_at"),
         "policy_activation_mode": policy_binding.get("activation_mode", "scheduled"),
@@ -1710,7 +1774,10 @@ def _policy_rule_projection(rule: Mapping[str, Any]) -> dict[str, Any]:
     projected.setdefault("description", str(rule.get("name") or rule.get("metric_id") or "指标"))
     projected.setdefault("rule_type", "monitor_only")
     projected.setdefault("threshold_fields", [])
-    projected.setdefault("thresholds", {})
+    if not isinstance(projected.get("thresholds"), Mapping):
+        projected["thresholds"] = {
+            str(field): "" for field in projected.get("threshold_fields", [])
+        }
     return projected
 
 
@@ -1848,11 +1915,15 @@ def _policy_run_usage(service: WorkspaceService) -> list[dict[str, Any]]:
     usage: list[dict[str, Any]] = []
     for run in service.store.list_runs():
         facts = _json_artifact(service, run, "data_layer_facts")
-        if facts is None:
-            continue
-        binding, _policy = _policy_binding(service, run, facts=facts)
-        version = str(binding["version"])
-        sha256 = str(binding.get("sha256") or "")
+        binding, policy = _policy_binding(service, run, facts=facts)
+        version = str(run.get("policy_version") or binding["version"])
+        sha256 = str(
+            run.get("published_policy_sha256")
+            or binding.get("published_sha256")
+            or (policy or {}).get("published_sha256")
+            or binding.get("sha256")
+            or ""
+        )
         if _SHA256_RE.fullmatch(sha256) is None:
             raise WorkspaceAPIError(
                 409,
@@ -1894,7 +1965,7 @@ def _policy_documents(service: WorkspaceService) -> list[dict[str, Any]]:
         if facts is None:
             continue
         binding, policy = _policy_binding(service, run, facts=facts)
-        version = str(binding.get("version") or "v1.0")
+        version = str(binding.get("version") or "")
         sha256 = str(binding.get("sha256") or "")
         key = (version, sha256)
         usage = {
@@ -2117,11 +2188,11 @@ def health_policy_projection(
     )
     scoring = _scoring_from_facts(facts or {})
     schedule = copy.deepcopy((policy or {}).get("inspection_schedule") or {"time": "09:00"})
-    version = str((current or {}).get("version") or "v1.0")
+    version = str((current or {}).get("version") or "")
     draft = {
         "schema_version": "1.0",
         "draft_revision": 1,
-        "base_version": version,
+        "base_version": version or None,
         "rules": rules,
         "scoring_config": scoring,
         "inspection_schedule": schedule,

@@ -253,7 +253,15 @@ def validate_stage0(
     if set(facts.get("evidence_ids", [])) != set(catalog_ids):
         raise ValidationError("facts evidence index differs from catalog")
     gate = policy_runtime_gate_projection(policy)
-    if facts.get("health_policy", {}).get("sha256") != policy["sha256"]:
+    expected_policy_projection = {
+        "version": policy["version"],
+        "published_sha256": policy["published_sha256"],
+        "sha256": policy["sha256"],
+        "effective_at": policy["effective_at"],
+        "mode": policy["mode"],
+        "activation_mode": gate["activation_mode"],
+    }
+    if facts.get("health_policy") != expected_policy_projection:
         raise ValidationError("facts are not bound to the frozen policy")
     coverage = facts["health"]["assessment"]
     expected = gate["evaluation"]

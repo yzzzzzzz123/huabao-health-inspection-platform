@@ -15,9 +15,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SERVER_ROOT = SCRIPT_DIR.parents[2]
+REPOSITORY_ROOT = SERVER_ROOT.parent
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -502,7 +503,7 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             query = self._query()
             if not segments:
                 self._reject_query(query)
-                html = PROJECT_ROOT / "huabao-new-energy-ai.html"
+                html = SERVER_ROOT / "huabao-new-energy-ai.html"
                 if html.is_file():
                     body = html.read_bytes()
                 else:
@@ -718,12 +719,13 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                 )
                 if isinstance(request["note"], str):
                     ensure_public_text_safe(request["note"], source="policy publish note")
-                response = self.server.policy_store.publish(
-                    request["draft_revision"],
-                    request["activation_mode"],
-                    request["effective_at"],
-                    request["note"],
-                )
+                with self.server.service.admission_lock():
+                    response = self.server.policy_store.publish(
+                        request["draft_revision"],
+                        request["activation_mode"],
+                        request["effective_at"],
+                        request["note"],
+                    )
                 self._send_json(
                     HTTPStatus.CREATED,
                     policy_version_projection(response),
@@ -745,7 +747,8 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                         "invalid_policy_request",
                         "policy version selection body must be an empty object",
                     )
-                response = self.server.policy_store.select_version(segments[3])
+                with self.server.service.admission_lock():
+                    response = self.server.policy_store.select_version(segments[3])
                 self._send_json(
                     HTTPStatus.OK,
                     policy_selection_projection(response),
@@ -1035,11 +1038,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
         if arguments.command == "config":
-            config = load_workspace_config(PROJECT_ROOT)
-            service = WorkspaceService(PROJECT_ROOT)
+            load_workspace_config(SERVER_ROOT)
+            service = WorkspaceService(REPOSITORY_ROOT, server_root=SERVER_ROOT)
             print(json.dumps(service.get_config(), ensure_ascii=False, indent=2, sort_keys=True))
             return 0
-        service = WorkspaceService(PROJECT_ROOT)
+        service = WorkspaceService(REPOSITORY_ROOT, server_root=SERVER_ROOT)
         if arguments.command == "list":
             print(json.dumps({"workspaces": service.list_workspaces()}, ensure_ascii=False, indent=2))
             return 0
@@ -1048,7 +1051,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if host not in LOOPBACK_HOSTS:
             raise RuntimeEnvironmentError("HTTP server may bind only to loopback")
         delivery_reconciler = DeliveryReconciler(service)
-        policy_store = PolicyStore(PROJECT_ROOT)
+        policy_store = service.policy_store
         httpd = WorkspaceHTTPServer(
             (host, port),
             service,
