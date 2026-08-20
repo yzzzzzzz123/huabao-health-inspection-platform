@@ -70,11 +70,76 @@ GET    /api/config
 GET    /api/workspaces
 POST   /api/workspaces
 GET    /api/workspaces/{run_id}
+GET    /api/workspaces/{run_id}/projection
 GET    /api/workspaces/{run_id}/artifacts/{artifact_id}
 PUT    /api/workspaces/{run_id}/artifacts/{artifact_id}
 POST   /api/workspaces/{run_id}/seal
 DELETE /api/workspaces/{run_id}
 ```
+
+### Business workbench compatibility
+
+`huabao-new-energy-ai.html` is kept byte-for-byte aligned with the established
+Huabao business workbench. Its historical read contracts are projected from
+the new artifact-ID workspace without reopening path access:
+
+```text
+GET /api/runs/heatmap
+GET /api/runs
+GET /api/runs/{run_id}/snapshot
+GET /api/runs/{run_id}/log
+GET /api/inspection-schedule
+GET /api/health-policy
+GET /api/health-policy/versions
+GET /api/health-policy/versions/{version}
+PUT /api/health-policy/draft/metrics/{metric_id}
+PUT /api/health-policy/draft/scoring
+PUT /api/health-policy/draft/schedule
+PUT /api/inspection-schedule
+POST /api/health-policy/publish
+POST /api/health-policy/versions/{version}/select
+DELETE /api/health-policy/versions/{version}
+```
+
+Every snapshot artifact is resolved through the registry and SQLite index,
+then rechecked for bytes, SHA-256 and run identity. Public compatibility
+responses omit `incarnation_id`, filesystem paths, raw responses and evidence
+bodies. Policy draft, schedule and immutable version operations persist in
+`.huabao/workbench-policy.sqlite3`. Their requests have fixed JSON shapes and
+sizes; draft writes require matching `draft_revision` and `If-Match:
+"draft-N"`. Workspace usage is matched by the immutable `(version, SHA-256)`
+pair; a same-label/different-SHA binding is reported as an identity conflict
+and also blocks deletion. Deleting any unoccupied version records its complete
+document in a hash-chained tombstone before removing it from the active list,
+so middle-version deletion and later version-label reuse preserve ancestry.
+`next_inspection` versions remain pending until a future trusted runtime writes
+the durable queue/claim fact; wall-clock passage alone never activates them.
+Legacy run, retry and action-note mutations still return `503`
+before changing state until the trusted Dolphin Gateway, cancel acknowledgement
+and mutable note store are deployed.
+
+The ignored policy database is initialized explicitly; server startup never
+reads the legacy repository. A one-time migration validates the legacy Git
+identity, reads only regular files, takes two stable SHA-256 snapshots, verifies
+the immutable version and selection hash chains, and imports only into an empty
+target database:
+
+```text
+python -I skills/health-inspection/scripts/policy_migration.py import-legacy \
+  --source-root <legacy-project-root> \
+  --expected-head 63ef013a003aad3057cc732105d45da16a4cd301
+python -I skills/health-inspection/scripts/policy_migration.py status
+```
+
+The current workstation migration binds four versions, draft revision 28 and
+37 metric rules to bundle SHA-256
+`47f0feb606dcc253566eeb6d666a583e0e10c56b61c37c64f5161427caa32b0f`.
+
+`GET /api/workspaces/{run_id}/projection` is the fixed, read-only HTML
+workbench view. It verifies the registered `orchestrator_ui_snapshot` bytes and
+identity before returning business-safe content, stage state, release metadata,
+and artifact hashes. It never returns `incarnation_id`, so the response cannot
+be reused as a capability for write, seal, or delete operations.
 
 Workspace creation accepts exactly one release form:
 

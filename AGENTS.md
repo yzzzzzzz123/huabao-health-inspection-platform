@@ -27,6 +27,16 @@ or workflow scheduling decisions.
   different retry fails with HTTP 409.
 - Workspace-detail GET, artifact GET/PUT, seal, and delete require the matching incarnation and
   platform-release SHA headers.
+- The tracked HTML remains byte-aligned with the established Huabao business
+  workbench. Its legacy read routes are server-built, hash-verified projections
+  only; they omit workspace capabilities, paths, raw responses and evidence
+  bodies. Health-policy draft, schedule and version mutations use the
+  server-owned SQLite policy store with optimistic revision checks. Version
+  occupancy is an exact version-plus-SHA identity; logical deletion retains a
+  hash-chained tombstone, and `next_inspection` never activates without a
+  durable runtime claim. Legacy run, retry and action-note mutations remain
+  fail closed until their trusted
+  Dolphin dispatch, cancel-ack and note contracts exist.
 - `input`, `context`, and `result` must equal the artifact registry at seal.
   Links, undeclared files, missing files, and hash drift fail closed.
 - Seal creates server-owned workspace/archive manifests, checkpoints the daily

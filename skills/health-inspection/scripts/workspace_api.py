@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import shutil
@@ -16,10 +17,11 @@ import sqlite3
 import tempfile
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -108,6 +110,86 @@ STAGE_INPUT_PREFIX: dict[str, str] = {
     "auditor": "auditor_",
     "reporter": "reporter_",
 }
+PUBLIC_UI_SNAPSHOT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "run_id",
+        "business_date",
+        "status",
+        "platform_release_sha256",
+        "headline",
+        "executive_summary",
+        "health_score",
+        "health_assessment",
+        "management_priorities",
+        "key_anomalies",
+        "recommended_actions",
+        "effect_reviews",
+        "decision_bottleneck",
+    }
+)
+_PUBLIC_SENSITIVE_KEYS = frozenset(
+    {
+        "incarnation_id",
+        "workspace_path",
+        "archive_path",
+        "server_path",
+        "filesystem_path",
+        "absolute_path",
+        "raw_response",
+        "response_raw",
+        "raw_request",
+        "request_raw",
+        "raw",
+        "request",
+        "response",
+        "body",
+        "content",
+        "payload",
+        "stdout",
+        "stderr",
+        "path",
+        "file_path",
+        "evidence",
+        "evidence_body",
+        "evidence_text",
+        "evidence_content",
+        "evidence_catalog",
+        "evidence_payload",
+        "access_token",
+        "token",
+        "api_key",
+        "password",
+        "passwd",
+        "secret",
+        "signing_secret",
+        "private_key",
+        "credentials",
+        "credential",
+        "webhook",
+        "authorization",
+        "signature",
+    }
+)
+_PUBLIC_ABSOLUTE_PATH_RE = re.compile(
+    r"(?im)(?:^|[\s\"'(<\[])"
+    r"(?:[a-z]:[\\/]|\\\\[^\\/\s]+[\\/]|"
+    r"/(?!/)[^\\/\s\"'<>|?*\x00]+(?:[\\/]|$))"
+)
+_PUBLIC_SECRET_VALUE_RE = re.compile(
+    r"(?is)(?:\bbearer\s+[a-z0-9._~+/=-]+|"
+    r"-----BEGIN[^\r\n]*PRIVATE KEY-----|"
+    r"(?:^|[?&;\s])(?:access[_-]?token|token|api[_-]?key|password|passwd|secret|"
+    r"signing[_-]?secret|private[_-]?key|webhook)\s*[:=]\s*[^\s&;]+)"
+)
+_PUBLIC_FORBIDDEN_TEXT_RE = re.compile(
+    r"(?i)(?:incarnation_id|workspace_path|archive_path|"
+    r"raw[_ .-]?(?:response|request|output|payload|content|body)|"
+    r"response\.raw\.json|evidence-catalog\.json|evidence[_ .-]?(?:body|content|text)|"
+    r"证据正文|原始响应)"
+)
+_PUBLIC_WEB_PATH_KEYS = frozenset({"landing_page", "page_path", "url_path"})
+_PUBLIC_WEB_PATH_RE = re.compile(r"^/(?:[a-zA-Z0-9._~!$&'()*+,;=:@%-]+/?)*$")
 
 
 class WorkspaceAPIError(RuntimeError):
@@ -130,6 +212,131 @@ class WorkspaceAPIError(RuntimeError):
         if self.details:
             value["details"] = self.details
         return {"error": value}
+
+
+def _normalized_public_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
+
+
+def _public_projection_error(source: str, message: str) -> WorkspaceAPIError:
+    return WorkspaceAPIError(
+        409,
+        "public_projection_unsafe",
+        f"{source} cannot cross the public workbench boundary: {message}",
+    )
+
+
+def _safe_public_value(
+    value: Any,
+    *,
+    source: str,
+    depth: int = 0,
+    field: str | None = None,
+) -> Any:
+    if depth > 32:
+        raise _public_projection_error(source, "document nesting exceeds the safety limit")
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for raw_key, child in value.items():
+            if not isinstance(raw_key, str):
+                raise _public_projection_error(source, "object keys must be strings")
+            key = _normalized_public_key(raw_key)
+            key_parts = frozenset(key.split("_"))
+            restricted_raw = "raw" in key_parts and bool(
+                key_parts & {"response", "request", "output", "payload", "content", "body"}
+            )
+            restricted_evidence = "evidence" in key_parts and bool(
+                key_parts & {"body", "content", "text", "catalog", "payload", "raw"}
+            )
+            if (
+                key in _PUBLIC_SENSITIVE_KEYS
+                or restricted_raw
+                or restricted_evidence
+                or key.endswith(
+                    (
+                        "_token",
+                        "_access_token",
+                        "_api_key",
+                        "_password",
+                        "_passwd",
+                        "_secret",
+                        "_private_key",
+                        "_webhook",
+                        "_credential",
+                        "_credentials",
+                        "_authorization",
+                        "_signature",
+                    )
+                )
+            ):
+                raise _public_projection_error(source, "document contains a restricted field")
+            projected[raw_key] = _safe_public_value(
+                child,
+                source=source,
+                depth=depth + 1,
+                field=key,
+            )
+        return projected
+    if isinstance(value, (list, tuple)):
+        return [
+            _safe_public_value(
+                item,
+                source=source,
+                depth=depth + 1,
+                field=field,
+            )
+            for item in value
+        ]
+    if isinstance(value, str):
+        if "\x00" in value:
+            raise _public_projection_error(source, "text contains NUL")
+        if _PUBLIC_ABSOLUTE_PATH_RE.search(value):
+            safe_web_path = (
+                field in _PUBLIC_WEB_PATH_KEYS
+                and _PUBLIC_WEB_PATH_RE.fullmatch(value) is not None
+                and ".." not in value.split("/")
+            )
+            if not safe_web_path:
+                raise _public_projection_error(source, "text contains an absolute filesystem path")
+        if _PUBLIC_SECRET_VALUE_RE.search(value) or _PUBLIC_FORBIDDEN_TEXT_RE.search(value):
+            raise _public_projection_error(source, "text contains restricted material")
+        return value
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise _public_projection_error(source, "number must be finite")
+        return value
+    raise _public_projection_error(source, "document contains an unsupported value")
+
+
+def safe_public_projection(
+    value: Mapping[str, Any],
+    *,
+    allowed_keys: Sequence[str] | frozenset[str],
+    source: str,
+) -> dict[str, Any]:
+    """Rebuild one public object from an explicit field allowlist."""
+
+    if not isinstance(value, Mapping):
+        raise _public_projection_error(source, "document must be an object")
+    if any(not isinstance(key, str) for key in value):
+        raise _public_projection_error(source, "object keys must be strings")
+    allowed = frozenset(allowed_keys)
+    if not set(value).issubset(allowed):
+        raise _public_projection_error(source, "document contains an unapproved field")
+    selected = {key: value[key] for key in value if key in allowed}
+    projected = _safe_public_value(selected, source=source)
+    assert isinstance(projected, dict)
+    return projected
+
+
+def ensure_public_text_safe(value: str, *, source: str) -> str:
+    """Reject capability material, raw evidence, secrets, and host paths in text."""
+
+    projected = _safe_public_value(value, source=source)
+    assert isinstance(projected, str)
+    return projected
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +557,13 @@ class WorkspaceService:
         self.history_root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         ensure_git_root(self.project_root)
+
+    @contextmanager
+    def admission_lock(self) -> Iterator[None]:
+        """Serialize cross-store admission decisions with workspace mutations."""
+
+        with self._lock:
+            yield
 
     def get_config(self) -> dict[str, Any]:
         from shared.dingtalk import config_status
@@ -1208,6 +1422,76 @@ class WorkspaceService:
             self._authorize(run, incarnation_id or "", release_sha256 or "")
         return self._workspace_projection(run, self.store.list_artifacts(run_id))
 
+    def get_workbench_projection(self, run_id: str) -> dict[str, Any]:
+        """Return the hash-verified, read-only projection used by the HTML workbench.
+
+        This endpoint intentionally omits the workspace incarnation capability.  It
+        is suitable for viewing an existing run, but it cannot be replayed as a
+        control binding for PUT, seal, or delete operations.
+        """
+
+        run = self._run_or_404(run_id)
+        artifacts = self.store.list_artifacts(run_id)
+        self._verify_indexed_files(run, artifacts)
+        workspace = self._workspace_projection(run, artifacts)
+        safe = {
+            "run_id": workspace["run_id"],
+            "business_date": workspace["business_date"],
+            "platform_release_sha256": workspace["platform_release_sha256"],
+            "platform_release": workspace["platform_release"],
+            "status": workspace["status"],
+            "workspace_version": workspace["workspace_version"],
+            "active": workspace["active"],
+            "created_at": workspace["created_at"],
+            "sealed_at": workspace["sealed_at"],
+            "checkpoint_commit": workspace["checkpoint_commit"],
+            "stage_statuses": workspace["stage_statuses"],
+            # Only UI-visible registry entries cross the unauthenticated
+            # projection boundary. Internal packets, raw responses, evidence
+            # catalogs and intelligence remain addressable only through the
+            # capability-bound artifact API.
+            "artifacts": [
+                item for item in workspace["artifacts"] if item.get("ui_visible") is True
+            ],
+            "control_mode": "read_only_projection",
+            "ui_snapshot": None,
+        }
+
+        snapshot = self.store.get_artifact(run_id, "orchestrator_ui_snapshot")
+        if snapshot is None:
+            return safe
+        content, media_type, _metadata = self.get_artifact(
+            run_id,
+            "orchestrator_ui_snapshot",
+            incarnation_id=str(run["incarnation_id"]),
+            release_sha256=str(run["platform_release_sha256"]),
+        )
+        if media_type != "application/json":
+            raise WorkspaceAPIError(409, "ui_snapshot_media_type", "UI snapshot must be JSON")
+        try:
+            payload = _parse_json_bytes(content, description="orchestrator_ui_snapshot")
+        except WorkspaceAPIError as exc:
+            raise WorkspaceAPIError(
+                409,
+                "ui_snapshot_invalid",
+                "UI snapshot is not valid strict UTF-8 JSON",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WorkspaceAPIError(409, "ui_snapshot_invalid", "UI snapshot must be an object")
+        identity = {
+            "run_id": run["run_id"],
+            "business_date": run["business_date"],
+            "platform_release_sha256": run["platform_release_sha256"],
+        }
+        if any(payload.get(key) != value for key, value in identity.items()):
+            raise WorkspaceAPIError(409, "ui_snapshot_binding", "UI snapshot identity does not match workspace")
+        safe["ui_snapshot"] = safe_public_projection(
+            payload,
+            allowed_keys=PUBLIC_UI_SNAPSHOT_FIELDS,
+            source="orchestrator_ui_snapshot",
+        )
+        return safe
+
     def list_workspaces(self) -> list[dict[str, Any]]:
         result = []
         for run in self.store.list_runs():
@@ -1824,4 +2108,13 @@ class WorkspaceService:
                 raise WorkspaceAPIError(500, "delete_failed", str(exc)) from exc
 
 
-__all__ = ["ArtifactRegistry", "ArtifactSpec", "WorkspaceAPIError", "WorkspaceService"]
+__all__ = [
+    "ArtifactRegistry",
+    "ArtifactSpec",
+    "STAGE_NAMES",
+    "STAGE_OUTPUTS",
+    "WorkspaceAPIError",
+    "WorkspaceService",
+    "ensure_public_text_safe",
+    "safe_public_projection",
+]
