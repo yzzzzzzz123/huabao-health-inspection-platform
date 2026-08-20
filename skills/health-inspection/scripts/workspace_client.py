@@ -163,7 +163,7 @@ class WorkspaceBinding:
         release_sha = str(payload.get("platform_release_sha256") or "")
         if (
             SHA256_RE.fullmatch(release_sha) is None
-            or release_sha != _sha256(_canonical_bytes(release))
+            or release_sha != _sha256(_canonical_bytes(release) + b"\n")
         ):
             raise WorkspaceClientError("workspace platform release hash is invalid")
         version = payload.get("workspace_version")
