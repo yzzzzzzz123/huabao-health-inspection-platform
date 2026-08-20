@@ -1146,7 +1146,10 @@ def _dingtalk_projection(service: WorkspaceService, run: Mapping[str, Any]) -> d
     }
 
 
-def config_projection(service: WorkspaceService) -> dict[str, Any]:
+def config_projection(
+    service: WorkspaceService,
+    policy_store: PolicyStore | None = None,
+) -> dict[str, Any]:
     """Return the legacy UI bootstrap contract without secret material."""
 
     raw_config = service.get_config()
@@ -1163,9 +1166,26 @@ def config_projection(service: WorkspaceService) -> dict[str, Any]:
     latest = _latest_run(service)
     policy_binding: dict[str, Any] | None = None
     metric_count = 37
+    if policy_store is not None:
+        overview = policy_store.overview()
+        metric_count = int(overview.get("metric_count") or metric_count)
+        selection = overview.get("launch_selection")
+        effective = overview.get("effective_version")
+        if isinstance(selection, Mapping) and selection.get("selected_version"):
+            policy_binding = {
+                "version": str(selection["selected_version"]),
+                "sha256": str(selection.get("selected_sha256") or ""),
+                "source": "server_owned_launch_selection",
+            }
+        elif isinstance(effective, Mapping) and effective.get("version"):
+            policy_binding = {
+                "version": str(effective["version"]),
+                "sha256": str(effective.get("sha256") or ""),
+                "source": "server_owned_effective_policy",
+            }
     if latest is not None:
         facts = _json_artifact(service, latest, "data_layer_facts")
-        if facts is not None:
+        if facts is not None and policy_binding is None:
             policy_binding, _policy = _policy_binding(service, latest, facts=facts)
             catalog = facts.get("metric_catalog")
             if isinstance(catalog, dict):
@@ -1178,7 +1198,7 @@ def config_projection(service: WorkspaceService) -> dict[str, Any]:
         "health_dimensions": ["traffic", "conversion", "product"],
         "metric_counts": {"total": metric_count, "traffic": 12, "conversion": 10, "product": 15},
         "health_policy_gate": {
-            "selection": "registered_dolphin_release_and_frozen_run_policy",
+            "selection": "server_owned_launch_selection_then_effective_policy",
             "freeze": "immutable_for_entire_run",
             "status": "ready" if policy_binding else "unavailable",
             **(policy_binding or {}),

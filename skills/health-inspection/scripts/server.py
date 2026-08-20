@@ -80,6 +80,14 @@ LEGACY_DELETE_ERROR_MESSAGES = {
     "delete_residue": "删除后仍有残留，运行已保留为待清理状态",
     "delete_failed": "级联删除失败，运行已保留为待清理状态",
 }
+LEGACY_ERROR_MESSAGES = {
+    "invalid_query": "请求参数无效，请刷新后重试",
+    "invalid_url": "请求地址无效，请刷新后重试",
+    "transfer_encoding_forbidden": "请求格式不受支持，请刷新后重试",
+    "request_body_forbidden": "该请求不能携带内容，请刷新后重试",
+    "legacy_write_unavailable": "可信 Dolphin Workflow 接口尚未配置，该操作暂时不可用",
+    "policy_store_unavailable": "系统配置存储暂时不可用，请稍后重试",
+}
 
 
 class DeliveryReconciler:
@@ -221,7 +229,8 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
     def _send_error(self, error: WorkspaceAPIError) -> None:
         self._send_json(error.status, error.as_dict())
 
-    def _send_policy_error(self, error: PolicyStoreError) -> None:
+    @staticmethod
+    def _policy_api_error(error: PolicyStoreError) -> WorkspaceAPIError:
         if isinstance(error, PolicyNotFoundError):
             status = HTTPStatus.NOT_FOUND
         elif isinstance(
@@ -236,7 +245,42 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
         code = getattr(error, "code", "policy_store_unavailable")
         if status == HTTPStatus.SERVICE_UNAVAILABLE:
             code = "policy_store_unavailable"
-        self._send_error(WorkspaceAPIError(int(status), str(code), str(error)))
+        return WorkspaceAPIError(int(status), str(code), str(error))
+
+    def _send_policy_error(self, error: PolicyStoreError) -> None:
+        self._send_error(self._policy_api_error(error))
+
+    def _is_legacy_workbench_request(self) -> bool:
+        path = urlsplit(self.path).path
+        return (
+            path == "/api/runs"
+            or path.startswith("/api/runs/")
+            or path == "/api/health-policy"
+            or path.startswith("/api/health-policy/")
+            or path == "/api/inspection-schedule"
+        )
+
+    def _send_workbench_error(self, error: WorkspaceAPIError) -> None:
+        delete_request = (
+            self.command == "DELETE"
+            and urlsplit(self.path).path.startswith("/api/runs/")
+        )
+        messages = LEGACY_DELETE_ERROR_MESSAGES if delete_request else LEGACY_ERROR_MESSAGES
+        message = messages.get(
+            error.code,
+            (
+                "删除失败，请刷新运行记录后重试"
+                if delete_request
+                else "操作失败，请刷新页面后重试"
+            )
+            if error.status >= 500
+            else (
+                "当前运行不能删除，请刷新后重试"
+                if delete_request
+                else error.message
+            ),
+        )
+        self._send_json(error.status, {"error": message, "type": error.code})
 
     def _segments(self, *, allow_query: bool = False) -> list[str]:
         parsed = urlsplit(self.path)
@@ -320,15 +364,6 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                 "workbench_origin_mismatch",
                 "workbench origin does not match the loopback server",
             )
-
-    def _send_legacy_delete_error(self, error: WorkspaceAPIError) -> None:
-        message = LEGACY_DELETE_ERROR_MESSAGES.get(
-            error.code,
-            "删除失败，请刷新运行记录后重试"
-            if error.status >= 500
-            else "当前运行不能删除，请刷新后重试",
-        )
-        self._send_json(error.status, {"error": message, "type": error.code})
 
     def _content_length(self, *, maximum: int) -> int:
         if self.headers.get("Transfer-Encoding"):
@@ -490,7 +525,10 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                 return
             if segments == ["api", "config"]:
                 self._reject_query(query)
-                self._send_json(HTTPStatus.OK, config_projection(self.server.service))
+                self._send_json(
+                    HTTPStatus.OK,
+                    config_projection(self.server.service, self.server.policy_store),
+                )
                 return
             if segments == ["api", "runs", "heatmap"]:
                 unknown = set(query) - {"year", "policy_version"}
@@ -645,13 +683,25 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                 return
             raise WorkspaceAPIError(404, "route_not_found", "route does not exist")
         except WorkspaceAPIError as exc:
-            self._send_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(exc)
+            else:
+                self._send_error(exc)
         except PolicyStoreError as exc:
-            self._send_policy_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(self._policy_api_error(exc))
+            else:
+                self._send_policy_error(exc)
         except Exception:
-            self._send_error(
-                WorkspaceAPIError(500, "internal_error", "Workspace Server encountered an internal error")
+            error = WorkspaceAPIError(
+                500,
+                "internal_error",
+                "Workspace Server encountered an internal error",
             )
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(error)
+            else:
+                self._send_error(error)
 
     def do_POST(self) -> None:  # noqa: N802
         try:
@@ -745,13 +795,25 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
                 return
             raise WorkspaceAPIError(404, "route_not_found", "route does not exist")
         except WorkspaceAPIError as exc:
-            self._send_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(exc)
+            else:
+                self._send_error(exc)
         except PolicyStoreError as exc:
-            self._send_policy_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(self._policy_api_error(exc))
+            else:
+                self._send_policy_error(exc)
         except Exception:
-            self._send_error(
-                WorkspaceAPIError(500, "internal_error", "Workspace Server encountered an internal error")
+            error = WorkspaceAPIError(
+                500,
+                "internal_error",
+                "Workspace Server encountered an internal error",
             )
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(error)
+            else:
+                self._send_error(error)
 
     def do_PUT(self) -> None:  # noqa: N802
         try:
@@ -851,16 +913,28 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             )
             self._send_json(HTTPStatus.CREATED if response["created"] else HTTPStatus.OK, response)
         except WorkspaceAPIError as exc:
-            self._send_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(exc)
+            else:
+                self._send_error(exc)
         except PolicyStoreError as exc:
-            self._send_policy_error(exc)
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(self._policy_api_error(exc))
+            else:
+                self._send_policy_error(exc)
         except Exception:
-            self._send_error(
-                WorkspaceAPIError(500, "internal_error", "Workspace Server encountered an internal error")
+            error = WorkspaceAPIError(
+                500,
+                "internal_error",
+                "Workspace Server encountered an internal error",
             )
+            if self._is_legacy_workbench_request():
+                self._send_workbench_error(error)
+            else:
+                self._send_error(error)
 
     def do_DELETE(self) -> None:  # noqa: N802
-        legacy_run_delete = urlsplit(self.path).path.startswith("/api/runs/")
+        legacy_workbench_request = self._is_legacy_workbench_request()
         try:
             segments = self._segments(allow_query=True)
             query = self._query()
@@ -916,20 +990,23 @@ class WorkspaceRequestHandler(BaseHTTPRequestHandler):
             )
             self._send_json(HTTPStatus.OK, response)
         except WorkspaceAPIError as exc:
-            if legacy_run_delete:
-                self._send_legacy_delete_error(exc)
+            if legacy_workbench_request:
+                self._send_workbench_error(exc)
             else:
                 self._send_error(exc)
         except PolicyStoreError as exc:
-            self._send_policy_error(exc)
+            if legacy_workbench_request:
+                self._send_workbench_error(self._policy_api_error(exc))
+            else:
+                self._send_policy_error(exc)
         except Exception:
             error = WorkspaceAPIError(
                 500,
                 "internal_error",
                 "Workspace Server encountered an internal error",
             )
-            if legacy_run_delete:
-                self._send_legacy_delete_error(error)
+            if legacy_workbench_request:
+                self._send_workbench_error(error)
             else:
                 self._send_error(error)
 
