@@ -158,7 +158,7 @@ class WorkspaceHTTPServer(ThreadingHTTPServer):
     ) -> None:
         self.service = service
         self.delivery_reconciler = delivery_reconciler
-        self.policy_store = policy_store or PolicyStore(service.project_root)
+        self.policy_store = policy_store or service.policy_store
         super().__init__(address, WorkspaceRequestHandler)
 
     def handle_error(self, request: Any, client_address: Any) -> None:

@@ -28,6 +28,7 @@ from typing import Any, Iterator, Mapping, Sequence
 SCRIPT_DIR = Path(__file__).resolve().parent
 SERVER_ROOT = SCRIPT_DIR.parents[2]
 REPOSITORY_ROOT = SERVER_ROOT.parent
+SERVER_COMPONENT_NAME = "huabao-worktree-server"
 
 import sys
 
@@ -396,6 +397,31 @@ class ArtifactRegistry:
             raise WorkspaceAPIError(500, "invalid_contract", "artifact contract schema must be 2.0")
         if document.get("workspace_version") != WORKSPACE_VERSION:
             raise WorkspaceAPIError(500, "invalid_contract", "workspace version mismatch")
+        expected_run_identity = {
+            "cadence": "daily",
+            "max_runs_per_business_date": 1,
+            "max_active_runs": 1,
+            "worktree_pattern": (
+                f"{SERVER_COMPONENT_NAME}/worktrees/{{business_date}}"
+            ),
+            "run_id_pattern": "hi-{business_date}",
+            "branch_pattern": "run/health-inspection/daily/{business_date}",
+            "recreate_requires_complete_daily_deletion": True,
+        }
+        if document.get("run_identity") != expected_run_identity:
+            raise WorkspaceAPIError(500, "invalid_contract", "run identity is not fixed")
+        expected_runtime_ownership = {
+            "server_component": SERVER_COMPONENT_NAME,
+            "state_root": f"{SERVER_COMPONENT_NAME}/.huabao",
+            "worktrees_root": f"{SERVER_COMPONENT_NAME}/worktrees",
+            "history_root": f"{SERVER_COMPONENT_NAME}/history",
+        }
+        if document.get("runtime_ownership") != expected_runtime_ownership:
+            raise WorkspaceAPIError(
+                500,
+                "invalid_contract",
+                "Workspace Server runtime ownership is not fixed",
+            )
         roots = document.get("runtime_roots")
         if roots != ["input", "context", "result"]:
             raise WorkspaceAPIError(500, "invalid_contract", "runtime roots are not fixed")
@@ -582,10 +608,17 @@ class WorkspaceService:
             or not repository_lexical.is_dir()
         ):
             raise WorkspaceAPIError(500, "repository_layout_invalid", "monorepo root is unsafe")
-        self.project_root = repository_lexical.resolve()
+        self.repository_root = repository_lexical.resolve()
+        # ``project_root`` remains a compatibility alias for Git helpers. It is
+        # deliberately never used as the Server runtime/state root.
+        self.project_root = self.repository_root
         server_lexical = Path(
             os.path.abspath(
-                os.fspath(server_root if server_root is not None else self.project_root / "huabao-worktree-server")
+                os.fspath(
+                    server_root
+                    if server_root is not None
+                    else self.repository_root / SERVER_COMPONENT_NAME
+                )
             )
         )
         if (
@@ -596,23 +629,64 @@ class WorkspaceService:
             raise WorkspaceAPIError(500, "repository_layout_invalid", "Workspace Server root is unsafe")
         self.server_root = server_lexical.resolve()
         if (
-            self.server_root.parent != self.project_root
-            or self.server_root.name != "huabao-worktree-server"
+            self.server_root.parent != self.repository_root
+            or self.server_root.name != SERVER_COMPONENT_NAME
         ):
             raise WorkspaceAPIError(
                 500,
                 "repository_layout_invalid",
                 "Workspace Server must run from the huabao-health-inspection-platform monorepo",
             )
-        ensure_git_root(self.project_root)
+        legacy_runtime_roots = tuple(
+            name
+            for name in (".huabao", "worktrees", "history")
+            if os.path.lexists(self.repository_root / name)
+        )
+        if legacy_runtime_roots:
+            raise WorkspaceAPIError(
+                500,
+                "runtime_layout_migration_required",
+                "parent-root runtime state must be migrated into the Workspace Server component",
+                details={"legacy_roots": list(legacy_runtime_roots)},
+            )
+        self.runtime_root = self.server_root
+        self.state_root = self.runtime_root / ".huabao"
+        if os.path.lexists(self.state_root) and (
+            _is_link_or_reparse(self.state_root) or not self.state_root.is_dir()
+        ):
+            raise WorkspaceAPIError(
+                500,
+                "workspace_root_unsafe",
+                "Workspace Server state root is unsafe",
+            )
+        self.server_relative_root = self.server_root.relative_to(self.repository_root)
+        self.worktrees_relative_root = (
+            PurePosixPath(self.server_relative_root.as_posix()) / "worktrees"
+        ).as_posix()
+        self.history_relative_root = (
+            PurePosixPath(self.server_relative_root.as_posix()) / "history"
+        ).as_posix()
+        ensure_git_root(self.repository_root)
         self.config: WorkspaceRuntimeConfig = load_workspace_config(self.server_root)
         self.registry = ArtifactRegistry(self.server_root / CONTRACT_PATH)
-        self._validate_source_snapshot_roots(self.project_root, require_tracked=True)
-        self.policy_store = PolicyStore(self.project_root)
-        self._initialize_unpublished_policy_draft()
-        self.store = StateStore(self.project_root)
+        self._validate_source_snapshot_roots(self.repository_root, require_tracked=True)
+        # Validate or create every Server-owned runtime root before either
+        # SQLite store can initialize or migrate schema state.
         self.worktrees_root = self._server_owned_root("worktrees")
         self.history_root = self._server_owned_root("history")
+        self.policy_store = PolicyStore(self.runtime_root)
+        self._initialize_unpublished_policy_draft()
+        self.store = StateStore(self.runtime_root)
+        expected_state_root = self.state_root.resolve()
+        if (
+            self.policy_store.database_path.parent != expected_state_root
+            or self.store.database_path.parent != expected_state_root
+        ):
+            raise WorkspaceAPIError(
+                500,
+                "repository_layout_invalid",
+                "Workspace Server state escaped its runtime root",
+            )
         self._lock = threading.RLock()
 
     def _validate_source_snapshot_roots(self, root: Path, *, require_tracked: bool) -> None:
@@ -671,7 +745,7 @@ class WorkspaceService:
         return value
 
     def _initialize_unpublished_policy_draft(self) -> None:
-        data_root = self.project_root / "huabao-dolphin-skills" / "shared" / "data"
+        data_root = self.repository_root / "huabao-dolphin-skills" / "shared" / "data"
         catalog = self._tracked_json(
             data_root / "metric_catalog.json",
             description="metric catalog",
@@ -893,7 +967,7 @@ class WorkspaceService:
             )
 
     def _server_owned_root(self, name: str) -> Path:
-        root = self.project_root / name
+        root = self.runtime_root / name
         if os.path.lexists(root) and (_is_link_or_reparse(root) or not root.is_dir()):
             raise WorkspaceAPIError(500, "workspace_root_unsafe", f"{name} root is unsafe")
         root.mkdir(parents=False, exist_ok=True)
@@ -992,19 +1066,40 @@ class WorkspaceService:
             raise WorkspaceAPIError(409, "workspace_binding_mismatch", "workspace binding does not match")
 
     def _workspace_path(self, run: Mapping[str, Any]) -> Path:
-        expected = (self.worktrees_root / str(run["business_date"])).resolve()
-        if expected.parent != self.worktrees_root or run["workspace_path"] != f"worktrees/{run['business_date']}":
+        business_date = str(run["business_date"])
+        expected = self.worktrees_root / business_date
+        expected_identity = f"{self.worktrees_relative_root}/{business_date}"
+        if (
+            expected.parent != self.worktrees_root
+            or run["workspace_path"] != expected_identity
+        ):
             raise WorkspaceAPIError(500, "workspace_identity_corrupt", "stored workspace identity is invalid")
+        if os.path.lexists(expected) and _is_link_or_reparse(expected):
+            raise WorkspaceAPIError(409, "workspace_root_unsafe", "daily worktree is redirected")
+        if expected.resolve(strict=False) != expected:
+            raise WorkspaceAPIError(500, "workspace_identity_corrupt", "stored workspace path is redirected")
         return expected
 
     def _archive_path(self, run: Mapping[str, Any]) -> Path:
-        expected = (self.history_root / str(run["business_date"])).resolve()
-        if expected.parent != self.history_root:
+        business_date = str(run["business_date"])
+        expected = self.history_root / business_date
+        expected_identity = f"{self.history_relative_root}/{business_date}"
+        if (
+            expected.parent != self.history_root
+            or run.get("archive_path") not in {None, expected_identity}
+        ):
             raise WorkspaceAPIError(500, "workspace_identity_corrupt", "stored archive identity is invalid")
+        if os.path.lexists(expected) and _is_link_or_reparse(expected):
+            raise WorkspaceAPIError(409, "archive_residue", "daily archive is redirected")
+        if expected.resolve(strict=False) != expected:
+            raise WorkspaceAPIError(500, "workspace_identity_corrupt", "stored archive path is redirected")
         return expected
 
-    @staticmethod
-    def _validate_daily_delete_identity(run_id: str, run: Mapping[str, Any]) -> str:
+    def _validate_daily_delete_identity(
+        self,
+        run_id: str,
+        run: Mapping[str, Any],
+    ) -> str:
         match = RUN_ID_RE.fullmatch(run_id)
         business_date = str(run.get("business_date", ""))
         try:
@@ -1016,8 +1111,8 @@ class WorkspaceService:
                 "stored daily workspace identity is invalid",
             ) from exc
         expected_branch = f"run/health-inspection/daily/{business_date}"
-        expected_workspace = f"worktrees/{business_date}"
-        expected_archive = f"history/{business_date}"
+        expected_workspace = f"{self.worktrees_relative_root}/{business_date}"
+        expected_archive = f"{self.history_relative_root}/{business_date}"
         if (
             match is None
             or match.group(1) != business_date
@@ -1037,19 +1132,24 @@ class WorkspaceService:
 
     @staticmethod
     def _target_path(root: Path, relative_path: str) -> Path:
-        root = root.resolve()
-        target = (root / Path(*PurePosixPath(relative_path).parts)).resolve(strict=False)
+        root_lexical = Path(os.path.abspath(os.fspath(root)))
+        if _is_link_or_reparse(root_lexical):
+            raise WorkspaceAPIError(409, "artifact_symlink", "artifact root may not be redirected")
+        root = root_lexical.resolve()
+        if root != root_lexical:
+            raise WorkspaceAPIError(500, "artifact_path_escape", "artifact root is redirected")
+        parts = PurePosixPath(relative_path).parts
+        target_lexical = root / Path(*parts)
+        current = root
+        for part in parts:
+            current = current / part
+            if os.path.lexists(current) and _is_link_or_reparse(current):
+                raise WorkspaceAPIError(409, "artifact_symlink", "artifact path may not be redirected")
+        target = target_lexical.resolve(strict=False)
         try:
             target.relative_to(root)
         except ValueError as exc:
             raise WorkspaceAPIError(500, "artifact_path_escape", "artifact path escapes workspace") from exc
-        current = root
-        for part in PurePosixPath(relative_path).parts[:-1]:
-            current = current / part
-            if current.exists() and current.is_symlink():
-                raise WorkspaceAPIError(409, "artifact_symlink", "artifact parent may not be a symlink")
-        if target.exists() and target.is_symlink():
-            raise WorkspaceAPIError(409, "artifact_symlink", "artifact may not be a symlink")
         return target
 
     @staticmethod
@@ -1114,15 +1214,14 @@ class WorkspaceService:
             "writer": "server",
         }
 
-    @staticmethod
-    def _source_hash_receipt(worktree: Path) -> bytes:
+    def _source_hash_receipt(self, worktree: Path) -> bytes:
         completed = run_git(worktree, ["ls-files", "-z"])
         lines: list[str] = []
         for relative in sorted(item for item in completed.stdout.split("\0") if item):
             if PurePosixPath(relative).parts[0] in {"input", "context", "result"}:
                 continue
-            path = worktree / Path(*PurePosixPath(relative).parts)
-            if path.is_symlink() or not path.is_file():
+            path = self._target_path(worktree, relative)
+            if _is_link_or_reparse(path) or not path.is_file():
                 raise WorkspaceAPIError(409, "snapshot_file_invalid", "snapshot contains a link or non-file")
             lines.append(f"{_sha256(path.read_bytes())}  {relative}")
         return (("\n".join(lines) + "\n") if lines else "").encode("utf-8")
@@ -1136,16 +1235,19 @@ class WorkspaceService:
         incarnation_id: str,
         created_at: str,
     ) -> None:
-        runtime = (worktree / ".runtime").resolve()
-        if runtime.parent != worktree.resolve():
+        worktree = worktree.resolve()
+        runtime = worktree / ".runtime"
+        if os.path.lexists(runtime) and _is_link_or_reparse(runtime):
+            raise WorkspaceAPIError(409, "runtime_symlink", "runtime root is redirected")
+        if runtime.parent != worktree or runtime.resolve(strict=False) != runtime:
             raise WorkspaceAPIError(500, "runtime_path_escape", "runtime path escapes worktree")
         environment = runtime / "environment"
         receipts = runtime / "dingtalk" / "receipts"
         locks = runtime / "dingtalk" / "locks"
         for directory in (environment, receipts, locks):
             directory.mkdir(parents=True, exist_ok=True)
-            if directory.is_symlink():
-                raise WorkspaceAPIError(409, "runtime_symlink", "runtime directory is a symlink")
+            if _is_link_or_reparse(directory):
+                raise WorkspaceAPIError(409, "runtime_symlink", "runtime directory is redirected")
         venv_receipt = {
             "schema_version": "1.0",
             "run_id": run_id,
@@ -1204,7 +1306,7 @@ class WorkspaceService:
         archive = self._archive_path(source_run)
         spec = self.registry.resolve(artifact_id)
         path = self._target_path(archive, spec.relative_path)
-        if not path.is_file() or path.is_symlink():
+        if not path.is_file() or _is_link_or_reparse(path):
             raise WorkspaceAPIError(
                 409,
                 "historical_artifact_missing",
@@ -1235,7 +1337,9 @@ class WorkspaceService:
             source_run = self.store.get_run_by_business_date(source_date, connection=connection)
             if source_run is None or source_run["status"] != "sealed":
                 continue
-            if source_run.get("archive_path") != f"history/{source_date}":
+            if source_run.get("archive_path") != (
+                f"{self.history_relative_root}/{source_date}"
+            ):
                 raise WorkspaceAPIError(
                     409,
                     "historical_archive_identity",
@@ -1255,7 +1359,7 @@ class WorkspaceService:
                 )
             manifest_spec = self.registry.resolve("orchestrator_archive_manifest")
             manifest_path = self._target_path(archive, manifest_spec.relative_path)
-            if not manifest_path.is_file() or manifest_path.is_symlink():
+            if not manifest_path.is_file() or _is_link_or_reparse(manifest_path):
                 raise WorkspaceAPIError(
                     409,
                     "historical_archive_manifest_missing",
@@ -1371,7 +1475,7 @@ class WorkspaceService:
             "platform_release_sha256": release_sha256,
             "workspace_version": self.registry.workspace_version,
             "status": "creating",
-            "workspace_path": f"worktrees/{business_date}",
+            "workspace_path": f"{self.worktrees_relative_root}/{business_date}",
             "branch_name": branch,
             "created_at": created_at,
         }
@@ -1413,9 +1517,9 @@ class WorkspaceService:
                             "another workspace is active",
                             details={"run_id": active["run_id"]},
                         )
-                    if worktree.exists() or registered_worktree(self.project_root, worktree):
+                    if worktree.exists() or registered_worktree(self.repository_root, worktree):
                         raise WorkspaceAPIError(409, "worktree_residue", "daily worktree residue exists")
-                    if branch_exists(self.project_root, branch):
+                    if branch_exists(self.repository_root, branch):
                         raise WorkspaceAPIError(409, "branch_residue", "daily branch residue exists")
                     historical_query, historical_runs = self._historical_runs_projection(
                         connection,
@@ -1438,7 +1542,7 @@ class WorkspaceService:
                         },
                     )
                     base_commit = create_linked_worktree(
-                        self.project_root,
+                        self.repository_root,
                         business_date=business_date,
                         run_id=run_id,
                         branch=branch,
@@ -1560,7 +1664,7 @@ class WorkspaceService:
                 if git_created:
                     try:
                         remove_daily_worktree(
-                            self.project_root,
+                            self.repository_root,
                             business_date=business_date,
                             run_id=run_id,
                             branch=branch,
@@ -1573,7 +1677,7 @@ class WorkspaceService:
                 if git_created:
                     try:
                         remove_daily_worktree(
-                            self.project_root,
+                            self.repository_root,
                             business_date=business_date,
                             run_id=run_id,
                             branch=branch,
@@ -1956,7 +2060,7 @@ class WorkspaceService:
             if artifact["relative_path"] != spec.relative_path:
                 raise WorkspaceAPIError(409, "artifact_index_corrupt", "artifact path differs from registry")
             target = self._target_path(worktree, spec.relative_path)
-            if not target.is_file() or target.is_symlink():
+            if not target.is_file() or _is_link_or_reparse(target):
                 raise WorkspaceAPIError(409, "artifact_file_missing", f"{spec.artifact_id} is missing")
             content = target.read_bytes()
             if len(content) != artifact["bytes"] or _sha256(content) != artifact["sha256"]:
@@ -1969,15 +2073,17 @@ class WorkspaceService:
             root = worktree / root_name
             if not root.exists():
                 continue
+            if _is_link_or_reparse(root):
+                raise WorkspaceAPIError(409, "artifact_symlink", "runtime root is redirected")
             for current, directories, filenames in os.walk(root, followlinks=False):
                 current_path = Path(current)
                 for directory in list(directories):
-                    if (current_path / directory).is_symlink():
-                        raise WorkspaceAPIError(409, "artifact_symlink", "runtime directory is a symlink")
+                    if _is_link_or_reparse(current_path / directory):
+                        raise WorkspaceAPIError(409, "artifact_symlink", "runtime directory is redirected")
                 for filename in filenames:
                     path = current_path / filename
-                    if path.is_symlink():
-                        raise WorkspaceAPIError(409, "artifact_symlink", "runtime artifact is a symlink")
+                    if _is_link_or_reparse(path):
+                        raise WorkspaceAPIError(409, "artifact_symlink", "runtime artifact is redirected")
                     actual_paths.add(path.relative_to(worktree).as_posix())
         extras = sorted(actual_paths - indexed_paths)
         missing = sorted(indexed_paths - actual_paths)
@@ -2337,8 +2443,8 @@ class WorkspaceService:
     ) -> Path:
         source = self._workspace_path(run)
         target = self._archive_path(run)
-        if target.exists():
-            if target.is_symlink() or not target.is_dir():
+        if os.path.lexists(target):
+            if _is_link_or_reparse(target) or not target.is_dir():
                 raise WorkspaceAPIError(409, "archive_residue", "archive target is invalid")
             for artifact in artifacts:
                 spec = self.registry.resolve(str(artifact["artifact_id"]))
@@ -2351,6 +2457,8 @@ class WorkspaceService:
             raise WorkspaceAPIError(500, "archive_path_escape", "temporary archive escapes history")
         try:
             temporary.mkdir(parents=False, exist_ok=False)
+            if _is_link_or_reparse(temporary) or temporary.resolve() != temporary:
+                raise WorkspaceAPIError(409, "archive_residue", "temporary archive is redirected")
             for root_name in ("input", "context", "result"):
                 source_root = source / root_name
                 if source_root.exists():
@@ -2364,7 +2472,11 @@ class WorkspaceService:
             temporary.rename(target)
             return target
         except BaseException:
-            if temporary.exists() and temporary.resolve().parent == self.history_root:
+            if (
+                os.path.lexists(temporary)
+                and not _is_link_or_reparse(temporary)
+                and temporary.resolve().parent == self.history_root
+            ):
                 shutil.rmtree(temporary)
             raise
 
@@ -2471,7 +2583,9 @@ class WorkspaceService:
                         run_id,
                         status="sealed",
                         checkpoint_commit=checkpoint,
-                        archive_path=f"history/{run['business_date']}",
+                        archive_path=(
+                            f"{self.history_relative_root}/{run['business_date']}"
+                        ),
                         sealed_at=sealed_at,
                         error_code=None,
                         error_message=None,
@@ -2566,13 +2680,13 @@ class WorkspaceService:
             archive = self.history_root / business_date
             try:
                 if os.path.lexists(archive):
-                    if archive.is_symlink() or archive.resolve().parent != self.history_root:
+                    if _is_link_or_reparse(archive) or archive.resolve().parent != self.history_root:
                         raise WorkspaceAPIError(409, "archive_residue", "archive path is unsafe")
                     shutil.rmtree(archive)
                 worktree = self.worktrees_root / business_date
                 self._workspace_path(run)
                 remove_daily_worktree(
-                    self.project_root,
+                    self.repository_root,
                     business_date=run["business_date"],
                     run_id=run_id,
                     branch=run["branch_name"],
@@ -2581,8 +2695,8 @@ class WorkspaceService:
                 if (
                     os.path.lexists(worktree)
                     or os.path.lexists(archive)
-                    or registered_worktree(self.project_root, worktree)
-                    or branch_exists(self.project_root, run["branch_name"])
+                    or registered_worktree(self.repository_root, worktree)
+                    or branch_exists(self.repository_root, run["branch_name"])
                 ):
                     raise WorkspaceAPIError(409, "delete_residue", "workspace deletion left residue")
                 occurred_at = _now_shanghai()
@@ -2681,8 +2795,8 @@ class WorkspaceService:
                 if (
                     os.path.lexists(worktree)
                     or os.path.lexists(archive)
-                    or registered_worktree(self.project_root, worktree)
-                    or branch_exists(self.project_root, branch)
+                    or registered_worktree(self.repository_root, worktree)
+                    or branch_exists(self.repository_root, branch)
                 ):
                     raise WorkspaceAPIError(
                         409,

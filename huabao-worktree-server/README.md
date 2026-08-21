@@ -13,6 +13,13 @@ worktree contains both this component and `huabao-dolphin-skills/`. Deploying a
 Server-only source copy cannot satisfy that snapshot contract and must fail
 closed.
 
+All application runtime roots belong to this component: `.huabao/`,
+`worktrees/`, and `history/`. The physical location does not change Git scope.
+In particular, `worktrees/YYYY-MM-DD` is the root of a linked checkout of the
+complete parent monorepo, so it contains sibling `huabao-dolphin-skills/` and
+`huabao-worktree-server/` directories and uses the parent's single Git common
+dir. It is not a checkout of this component alone.
+
 ## Migration provenance
 
 The initial mechanical baseline was taken from legacy source HEAD
@@ -32,15 +39,28 @@ dependency and must remain untouched.
 - Python `>=3.11`, standard library only.
 - Loopback HTTP binding only (default `127.0.0.1:8765`).
 - One tracked Server environment contract: `shared/.env`.
-- One SQLite control-plane index at the monorepo root:
+- One SQLite control-plane index at Server-relative
   `.huabao/workspace-state.sqlite3` (ignored).
-- Complete-monorepo daily worktrees at parent-root
+- Complete-parent-monorepo daily linked worktrees at Server-relative
   `worktrees/YYYY-MM-DD` (ignored by the main worktree).
-- Sealed business archives at parent-root `history/YYYY-MM-DD` (ignored by Git).
+- Sealed business archives at Server-relative `history/YYYY-MM-DD` (ignored by
+  Git).
 
-Every complete-monorepo daily worktree also contains ignored machine-local directories
-`.runtime/environment` and `.runtime/dingtalk/{receipts,locks}`. The
-`environment/venv.json` receipt records that Agent execution is hosted by
+An upgrade from the former parent-root runtime layout must be performed while
+the service is stopped. A controlled migration must move the parent-root
+`.huabao/` databases here, remap stored workspace/archive paths, and verify both
+SQLite integrity and filesystem identities before normal startup. If the old
+and new locations both contain state, startup fails closed; it must not select
+one side, merge them heuristically, or initialize an empty database over the
+existing facts. Parent-root `worktrees/` and `history/` are never runtime
+fallbacks.
+
+Every complete-monorepo daily worktree also contains ignored machine-local
+directories at its own root: `.runtime/environment` and
+`.runtime/dingtalk/{receipts,locks}`. For example, the first path resolves as
+`huabao-worktree-server/worktrees/YYYY-MM-DD/.runtime/environment` from the main
+checkout; it is not nested again inside the dated snapshot's Server component.
+The `environment/venv.json` receipt records that Agent execution is hosted by
 Dolphin, so an Agent virtual environment is not materialized in the Server
 worktree; the trusted Server process itself remains Python `>=3.11`
 standard-library only. These files never enter Git or the business archive.
@@ -115,9 +135,9 @@ DELETE /api/runs/{run_id}?delete_request_id={request_id}
 Every snapshot artifact is resolved through the registry and SQLite index,
 then rechecked for bytes, SHA-256 and run identity. Public compatibility
 responses omit `incarnation_id`, filesystem paths, raw responses and evidence
-bodies. Policy draft, schedule and immutable version operations persist in
-`.huabao/workbench-policy.sqlite3`. Their requests have fixed JSON shapes and
-sizes; draft writes require matching `draft_revision` and `If-Match:
+bodies. Policy draft, schedule and immutable version operations persist in the
+Server-owned `.huabao/workbench-policy.sqlite3`. Their requests have fixed JSON
+shapes and sizes; draft writes require matching `draft_revision` and `If-Match:
 "draft-N"`. Workspace usage is matched by the immutable `(version, SHA-256)`
 pair; a same-label/different-SHA binding is reported as an identity conflict
 and also blocks deletion. Deleting any unoccupied version records its complete

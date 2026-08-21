@@ -5,7 +5,7 @@
     "cadence": "daily",
     "max_runs_per_business_date": 1,
     "max_active_runs": 1,
-    "worktree_pattern": "worktrees/{business_date}",
+    "worktree_pattern": "huabao-worktree-server/worktrees/{business_date}",
     "run_id_pattern": "hi-{business_date}",
     "branch_pattern": "run/health-inspection/daily/{business_date}",
     "recreate_requires_complete_daily_deletion": true
@@ -13,6 +13,12 @@
   "source_snapshot": {
     "mode": "full_monorepo",
     "required_roots": ["huabao-dolphin-skills", "huabao-worktree-server"]
+  },
+  "runtime_ownership": {
+    "server_component": "huabao-worktree-server",
+    "state_root": "huabao-worktree-server/.huabao",
+    "worktrees_root": "huabao-worktree-server/worktrees",
+    "history_root": "huabao-worktree-server/history"
   },
   "runtime_roots": ["input", "context", "result"],
   "artifacts": [

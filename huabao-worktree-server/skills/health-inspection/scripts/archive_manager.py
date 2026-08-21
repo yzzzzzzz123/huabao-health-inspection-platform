@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -14,14 +16,30 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ARTIFACT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SCRIPT_DIR = Path(__file__).resolve().parent
+SERVER_COMPONENT_NAME = "huabao-worktree-server"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from state_store import StateStore, canonical_json  # noqa: E402
+from state_store import (  # noqa: E402
+    StateStore,
+    StateStoreError,
+    canonical_json,
+    resolve_server_runtime_root,
+)
 
 
 class ArchiveError(RuntimeError):
     pass
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
 
 
 def _sha256(path: Path) -> str:
@@ -32,21 +50,67 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def archive_root(project_root: Path, business_date: str) -> Path:
+def _safe_descendant(root: Path, relative_path: str) -> Path:
+    root_lexical = Path(os.path.abspath(os.fspath(root)))
+    if _is_link_or_reparse(root_lexical):
+        raise ArchiveError("archive root is redirected")
+    resolved_root = root_lexical.resolve()
+    if resolved_root != root_lexical:
+        raise ArchiveError("archive root is redirected")
+    current = resolved_root
+    for part in PurePosixPath(relative_path).parts:
+        current = current / part
+        if os.path.lexists(current) and _is_link_or_reparse(current):
+            raise ArchiveError("archive path is redirected")
+    target = current.resolve(strict=False)
+    try:
+        target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ArchiveError("archive path escapes archive root") from exc
+    return target
+
+
+def _server_runtime_root(repository_root: Path) -> Path:
+    root_lexical = Path(os.path.abspath(os.fspath(repository_root)))
+    try:
+        if root_lexical.name == SERVER_COMPONENT_NAME:
+            return resolve_server_runtime_root(
+                root_lexical.parent,
+                server_root=root_lexical,
+            )
+        return resolve_server_runtime_root(root_lexical)
+    except StateStoreError as exc:
+        raise ArchiveError(str(exc)) from exc
+
+
+def archive_root(repository_root: Path, business_date: str) -> Path:
     if not DATE_RE.fullmatch(business_date):
         raise ArchiveError("business_date must be YYYY-MM-DD")
-    history = (project_root.resolve() / "history").resolve()
-    target = (history / business_date).resolve()
-    if target.parent != history:
+    history_lexical = _server_runtime_root(repository_root) / "history"
+    if (
+        not os.path.lexists(history_lexical)
+        or not history_lexical.is_dir()
+        or _is_link_or_reparse(history_lexical)
+        or history_lexical.resolve() != history_lexical
+    ):
+        raise ArchiveError("history root is unavailable or redirected")
+    history = history_lexical.resolve()
+    target = history / business_date
+    if os.path.lexists(target) and _is_link_or_reparse(target):
+        raise ArchiveError("archive date root is redirected")
+    if target.parent != history or target.resolve(strict=False) != target:
         raise ArchiveError("archive path escapes history root")
     return target
 
 
-def verify_archive(project_root: Path, business_date: str) -> dict[str, Any]:
-    project = project_root.resolve()
-    root = archive_root(project, business_date)
-    manifest_path = root / "context" / "00-orchestrator" / "archive-manifest.json"
-    if not manifest_path.is_file() or manifest_path.is_symlink():
+def verify_archive(repository_root: Path, business_date: str) -> dict[str, Any]:
+    server_root = _server_runtime_root(repository_root)
+    root = archive_root(server_root, business_date)
+    manifest_path = _safe_descendant(
+        root,
+        "context/00-orchestrator/archive-manifest.json",
+    )
+    if not manifest_path.is_file() or _is_link_or_reparse(manifest_path):
         raise ArchiveError("archive manifest is missing")
     try:
         manifest_bytes = manifest_path.read_bytes()
@@ -54,10 +118,16 @@ def verify_archive(project_root: Path, business_date: str) -> dict[str, Any]:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ArchiveError("archive manifest is invalid") from exc
     run_id = f"hi-{business_date}"
-    store = StateStore(project)
+    store = StateStore(server_root)
     run = store.get_run(run_id)
     indexed_manifest = store.get_artifact(run_id, "orchestrator_archive_manifest")
-    if run is None or run.get("status") != "sealed" or indexed_manifest is None:
+    if (
+        run is None
+        or run.get("status") != "sealed"
+        or run.get("archive_path")
+        != f"{SERVER_COMPONENT_NAME}/history/{business_date}"
+        or indexed_manifest is None
+    ):
         raise ArchiveError("archive has no sealed SQLite identity")
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     if (
@@ -124,21 +194,26 @@ def verify_archive(project_root: Path, business_date: str) -> dict[str, Any]:
             "result",
         }:
             raise ArchiveError("archive artifact path is unsafe")
-        path = root / Path(*pure.parts)
-        if not path.is_file() or path.is_symlink():
+        path = _safe_descendant(root, relative_path)
+        if not path.is_file() or _is_link_or_reparse(path):
             raise ArchiveError(f"archive artifact is missing: {relative_path}")
         if path.stat().st_size != record.get("bytes") or _sha256(path) != record.get("sha256"):
             raise ArchiveError(f"archive artifact hash differs: {relative_path}")
         checked += 1
     actual_paths: set[str] = set()
     for top in ("input", "context", "result"):
-        folder = root / top
+        folder = _safe_descendant(root, top)
         if not folder.exists():
             continue
-        for path in folder.rglob("*"):
-            if path.is_symlink():
-                raise ArchiveError("archive contains a symlink")
-            if path.is_file():
+        for current, directories, filenames in os.walk(folder, followlinks=False):
+            current_path = Path(current)
+            for directory in list(directories):
+                if _is_link_or_reparse(current_path / directory):
+                    raise ArchiveError("archive contains a redirected directory")
+            for filename in filenames:
+                path = current_path / filename
+                if _is_link_or_reparse(path):
+                    raise ArchiveError("archive contains a redirected file")
                 actual_paths.add(path.relative_to(root).as_posix())
     manifest_relative = manifest_path.relative_to(root).as_posix()
     if actual_paths != record_paths | {manifest_relative}:

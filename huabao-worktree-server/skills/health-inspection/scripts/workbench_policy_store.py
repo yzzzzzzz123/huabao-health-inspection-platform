@@ -14,8 +14,10 @@ import copy
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
+import stat
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -136,10 +138,13 @@ def _copy(value: Any) -> Any:
 
 
 def _is_redirect(path: Path) -> bool:
-    if path.is_symlink():
-        return True
-    is_junction = getattr(path, "is_junction", None)
-    return bool(is_junction is not None and is_junction())
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
 
 
 def _version_ordinal(version: Any) -> int:
@@ -249,7 +254,18 @@ class WorkbenchPolicyStore:
         *,
         database_path: Path | str | None = None,
     ) -> None:
-        self.project_root = Path(project_root).expanduser().resolve()
+        root_lexical = Path(
+            os.path.abspath(os.fspath(Path(project_root).expanduser()))
+        )
+        if (
+            not os.path.lexists(root_lexical)
+            or _is_redirect(root_lexical)
+            or not root_lexical.is_dir()
+        ):
+            raise WorkbenchPolicyStoreError(
+                "Workspace Server runtime root is unsafe"
+            )
+        self.project_root = root_lexical.resolve()
         state_root = self.project_root / ".huabao"
         if _is_redirect(state_root) or (state_root.exists() and not state_root.is_dir()):
             raise WorkbenchPolicyStoreError(".huabao must be a regular server-owned directory")

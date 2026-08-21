@@ -7,11 +7,16 @@ AI 平台、把 Worktree Server 作为服务运行。
 ```text
 huabao-health-inspection-platform/       # 唯一 Git 根
 ├─ huabao-dolphin-skills/                # AI 平台业务 bundle
-├─ huabao-worktree-server/               # 服务端与 HTML 工作台
-├─ worktrees/YYYY-MM-DD/                 # 完整 monorepo linked worktree
-├─ history/YYYY-MM-DD/                   # 完成态业务归档
-└─ .huabao/                              # Git common-dir 控制面状态
+└─ huabao-worktree-server/               # 服务端、HTML 工作台与全部运行态
+   ├─ .huabao/                           # Server 控制面状态（Git 忽略）
+   ├─ history/YYYY-MM-DD/                # 完成态业务归档（Git 忽略）
+   └─ worktrees/YYYY-MM-DD/              # 完整父仓 linked worktree（Git 忽略）
+      ├─ huabao-dolphin-skills/          # 同一快照中的 Dolphin 组件
+      └─ huabao-worktree-server/         # 同一快照中的 Server 组件
 ```
+
+父目录只有一个 `.git`。上图中的日期目录虽然放在 Server 的 `worktrees/` 下，却是完整
+父仓的 linked worktree 根；它不是只检出 Server 的组件目录，也不包含嵌套仓库。
 
 ## 部署模型
 
@@ -30,7 +35,7 @@ linked worktree。
 巡检都在创建记录和 worktree 前失败关闭，Dolphin 也不会提供默认政策。
 
 每次新建运行时，Server 从父 Git 根构建隔离 snapshot，并在
-`worktrees/YYYY-MM-DD` 创建 linked worktree。该目录天然包含
+`huabao-worktree-server/worktrees/YYYY-MM-DD` 创建 linked worktree。该目录天然包含
 `huabao-dolphin-skills/` 与 `huabao-worktree-server/` 的同一提交视图；运行期只在合同允许
 的 `input/`、`context/`、`result/` 与忽略的 `.runtime/` 中写入数据。
 
@@ -56,11 +61,24 @@ python -I skills/health-inspection/scripts/orchestrator_cli.py release
 
 ## 运行数据边界
 
-- `.huabao/`、`.runtime/`、`worktrees/*` 与 `history/*` 是机器运行态或业务归档，均由
-  父根 `.gitignore` 排除；`worktrees/.gitkeep` 和 `history/.gitkeep` 只保留目录结构。
+- `huabao-worktree-server/.huabao/`、`huabao-worktree-server/worktrees/*` 与
+  `huabao-worktree-server/history/*` 是 Server 控制态、完整父仓 linked worktree 或业务
+  归档，均由 Git 排除；只有 Server 下的 `worktrees/.gitkeep` 与
+  `history/.gitkeep` 保留目录结构，父根不再保留同名运行目录。
+- 日期运行的 `.runtime/` 位于 linked worktree 根，即
+  `huabao-worktree-server/worktrees/YYYY-MM-DD/.runtime/`；`input/`、`context/` 和
+  `result/` 也以该完整父仓快照根为基准。
 - SQLite/WAL/SHM、虚拟环境、缓存、日志与真实凭据不进入 Git。
 - 唯一允许跟踪的环境合同是
   `huabao-worktree-server/shared/.env`，其中不得出现真实 token 或 secret。
+
+### 旧运行态迁移
+
+旧版若已在父根 `.huabao/` 保存 SQLite，升级前必须停服并执行受控迁移：把数据库移至
+`huabao-worktree-server/.huabao/`，重映射其中的 workspace/archive 绑定，并完成数据库
+完整性与文件身份复核后再启动。旧、新两个位置同时存在有效状态时服务必须 fail closed；
+不得自动挑选、拼接或用新建空库覆盖旧状态。父根旧 `worktrees/` 与 `history/` 也不得
+继续作为运行时 fallback。
 
 ## 历史迁移说明
 

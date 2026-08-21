@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
@@ -21,19 +23,107 @@ class StateStoreError(RuntimeError):
     """The durable control-plane index is invalid or unavailable."""
 
 
+SERVER_COMPONENT_NAME = "huabao-worktree-server"
+LEGACY_RUNTIME_ROOTS = (".huabao", "worktrees", "history")
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
+
+
+def resolve_server_runtime_root(
+    repository_root: Path,
+    *,
+    server_root: Path | None = None,
+) -> Path:
+    """Validate the single-Git-root/Server-runtime-root boundary without writing."""
+
+    repository_lexical = Path(os.path.abspath(os.fspath(repository_root)))
+    if (
+        not os.path.lexists(repository_lexical)
+        or _is_link_or_reparse(repository_lexical)
+        or not repository_lexical.is_dir()
+    ):
+        raise StateStoreError("monorepo root is unsafe")
+    repository = repository_lexical.resolve()
+    server_lexical = Path(
+        os.path.abspath(
+            os.fspath(
+                server_root
+                if server_root is not None
+                else repository / SERVER_COMPONENT_NAME
+            )
+        )
+    )
+    if (
+        not os.path.lexists(server_lexical)
+        or _is_link_or_reparse(server_lexical)
+        or not server_lexical.is_dir()
+    ):
+        raise StateStoreError("Workspace Server runtime root is unsafe")
+    server = server_lexical.resolve()
+    if server.parent != repository or server.name != SERVER_COMPONENT_NAME:
+        raise StateStoreError("Workspace Server runtime root escaped the monorepo")
+    legacy = tuple(
+        name
+        for name in LEGACY_RUNTIME_ROOTS
+        if os.path.lexists(repository / name)
+    )
+    if legacy:
+        raise StateStoreError(
+            "parent-root runtime state must be migrated into the Workspace Server component"
+        )
+    return server
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 class StateStore:
     def __init__(self, project_root: Path, *, database_path: Path | None = None) -> None:
-        self.project_root = project_root.resolve()
-        self.database_path = (
-            database_path.resolve()
-            if database_path is not None
-            else self.project_root / ".huabao" / "workspace-state.sqlite3"
+        root_lexical = Path(os.path.abspath(os.fspath(project_root)))
+        if (
+            not os.path.lexists(root_lexical)
+            or _is_link_or_reparse(root_lexical)
+            or not root_lexical.is_dir()
+        ):
+            raise StateStoreError("Workspace Server runtime root is unsafe")
+        self.project_root = root_lexical.resolve()
+        state_root = self.project_root / ".huabao"
+        if os.path.lexists(state_root):
+            if _is_link_or_reparse(state_root) or not state_root.is_dir():
+                raise StateStoreError(".huabao must be a regular server-owned directory")
+        else:
+            state_root.mkdir(parents=False)
+        if (
+            _is_link_or_reparse(state_root)
+            or not state_root.is_dir()
+            or state_root.resolve().parent != self.project_root
+        ):
+            raise StateStoreError("workspace state escaped the Workspace Server root")
+        selected = Path(
+            os.path.abspath(
+                os.fspath(
+                    database_path
+                    if database_path is not None
+                    else state_root / "workspace-state.sqlite3"
+                )
+            )
         )
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        if selected.parent != state_root:
+            raise StateStoreError("workspace state database must stay in .huabao")
+        if os.path.lexists(selected) and (
+            _is_link_or_reparse(selected) or not selected.is_file()
+        ):
+            raise StateStoreError("workspace state database is not a regular file")
+        self.database_path = selected.resolve()
         self._initialize()
 
     def connect(self) -> sqlite3.Connection:

@@ -17,7 +17,7 @@ if str(SERVER_ROOT) not in sys.path:
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from state_store import StateStore  # noqa: E402
+from state_store import StateStore, resolve_server_runtime_root  # noqa: E402
 
 
 def _print(value: Any) -> None:
@@ -39,7 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
-        store = StateStore(REPOSITORY_ROOT)
+        runtime_root = resolve_server_runtime_root(
+            REPOSITORY_ROOT,
+            server_root=SERVER_ROOT,
+        )
+        store = StateStore(runtime_root)
         if arguments.command == "list":
             _print({"runs": store.list_runs()})
         elif arguments.command == "show":

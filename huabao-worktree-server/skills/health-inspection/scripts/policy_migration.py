@@ -72,10 +72,13 @@ class ImportBundle:
 
 
 def _is_redirect(path: Path) -> bool:
-    if path.is_symlink():
-        return True
-    is_junction = getattr(path, "is_junction", None)
-    return bool(is_junction is not None and is_junction())
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -647,14 +650,19 @@ def _parse_bundle(snapshot: SourceSnapshot) -> ImportBundle:
 
 
 def _database_paths() -> tuple[Path, tuple[Path, ...]]:
-    state_root = REPOSITORY_ROOT / ".huabao"
+    legacy_state_root = REPOSITORY_ROOT / ".huabao"
+    if os.path.lexists(legacy_state_root):
+        raise MigrationError(
+            "parent-root runtime state must be migrated into the Workspace Server component first"
+        )
+    state_root = SERVER_ROOT / ".huabao"
     if state_root.exists():
         _require_regular_directory(state_root, label="target policy state directory")
     else:
         state_root.mkdir(mode=0o700)
         _require_regular_directory(state_root, label="target policy state directory")
-    if state_root.resolve(strict=True).parent != REPOSITORY_ROOT.resolve(strict=True):
-        raise MigrationError("target policy state escaped the monorepo root")
+    if state_root.resolve(strict=True).parent != SERVER_ROOT.resolve(strict=True):
+        raise MigrationError("target policy state escaped the Workspace Server root")
     database = state_root / "workbench-policy.sqlite3"
     related = (
         database,
@@ -679,7 +687,7 @@ def _reserve_empty_database(database: Path, related: Sequence[Path]) -> None:
 
 
 def _remove_created_database(related: Sequence[Path]) -> None:
-    state_root = (REPOSITORY_ROOT / ".huabao").resolve(strict=True)
+    state_root = (SERVER_ROOT / ".huabao").resolve(strict=True)
     for path in reversed(tuple(related)):
         if not path.exists() and not path.is_symlink():
             continue
@@ -700,7 +708,7 @@ def _import_legacy(source_value: str, expected_head: str) -> dict[str, Any]:
     _reserve_empty_database(database, related)
     imported = False
     try:
-        store = WorkbenchPolicyStore(REPOSITORY_ROOT, database_path=database)
+        store = WorkbenchPolicyStore(SERVER_ROOT, database_path=database)
         overview = store.import_state(
             bundle.versions,
             bundle.draft,
@@ -732,7 +740,7 @@ def _import_legacy(source_value: str, expected_head: str) -> dict[str, Any]:
 
 
 def _read_status(database: Path | None = None) -> dict[str, Any]:
-    selected = database or (REPOSITORY_ROOT / ".huabao" / "workbench-policy.sqlite3")
+    selected = database or (SERVER_ROOT / ".huabao" / "workbench-policy.sqlite3")
     if _is_redirect(selected):
         raise MigrationError("target workbench policy database must not be a link")
     if not selected.exists():

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ from typing import Any, Mapping, Sequence
 SCRIPT_DIR = Path(__file__).resolve().parent
 SERVER_ROOT = SCRIPT_DIR.parents[2]
 REPOSITORY_ROOT = SERVER_ROOT.parent
+SERVER_COMPONENT_NAME = "huabao-worktree-server"
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 if str(SCRIPT_DIR) not in sys.path:
@@ -29,6 +31,16 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 
 class GitWorkspaceError(RuntimeError):
     """A direct-argv Git operation failed or escaped the repository contract."""
+
+
+def _is_link_or_reparse(path: Path) -> bool:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and attributes & reparse_flag)
 
 
 def _git_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -90,11 +102,9 @@ def ensure_git_root(project_root: Path) -> None:
     if reported != root:
         raise GitWorkspaceError("repository_root must be the exact Huabao monorepo Git root")
     dot_git = root / ".git"
-    is_junction = getattr(dot_git, "is_junction", None)
     if (
         not dot_git.is_dir()
-        or dot_git.is_symlink()
-        or (is_junction is not None and is_junction())
+        or _is_link_or_reparse(dot_git)
     ):
         raise GitWorkspaceError("Workspace Server must run from the primary monorepo worktree")
     absolute_git_dir = run_git(root, ["rev-parse", "--absolute-git-dir"])
@@ -182,9 +192,19 @@ def validate_daily_identity(
     if branch_match is None or branch_match.group("date") != business_date:
         raise GitWorkspaceError("branch does not match business_date")
     root = project_root.resolve()
-    expected = (root / "worktrees" / business_date).resolve()
-    if worktree_path.resolve() != expected or expected.parent != (root / "worktrees").resolve():
+    namespace_lexical = root / SERVER_COMPONENT_NAME / "worktrees"
+    if (
+        not os.path.lexists(namespace_lexical)
+        or _is_link_or_reparse(namespace_lexical)
+        or not namespace_lexical.is_dir()
+    ):
+        raise GitWorkspaceError("daily worktree namespace is unsafe")
+    expected = namespace_lexical / business_date
+    candidate = Path(os.path.abspath(os.fspath(worktree_path)))
+    if candidate != expected or expected.parent != namespace_lexical:
         raise GitWorkspaceError("worktree path is outside the daily namespace")
+    if os.path.lexists(candidate) and _is_link_or_reparse(candidate):
+        raise GitWorkspaceError("daily worktree path is redirected")
 
 
 def create_isolated_snapshot(project_root: Path, *, business_date: str) -> str:
@@ -241,7 +261,7 @@ def create_linked_worktree(
         branch=branch,
         worktree_path=worktree_path,
     )
-    if worktree_path.exists() or registered_worktree(root, worktree_path):
+    if os.path.lexists(worktree_path) or registered_worktree(root, worktree_path):
         raise GitWorkspaceError("daily worktree already exists")
     if branch_exists(root, branch):
         raise GitWorkspaceError("daily branch already exists")
@@ -308,8 +328,8 @@ def remove_daily_worktree(
         branch=branch,
         worktree_path=worktree_path,
     )
-    if worktree_path.is_symlink():
-        raise GitWorkspaceError("daily worktree path is a link; refusing deletion")
+    if _is_link_or_reparse(worktree_path):
+        raise GitWorkspaceError("daily worktree path is redirected; refusing deletion")
     target = worktree_path.resolve()
     registration = next(
         (

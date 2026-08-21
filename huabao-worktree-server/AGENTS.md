@@ -11,10 +11,12 @@ business calculation code, and workflow decisions.
 - Business timezone: `Asia/Shanghai`.
 - Currency: `CNY`.
 - Dimensions: traffic, conversion, and product only.
-- Daily identity: `hi-YYYY-MM-DD`, `worktrees/YYYY-MM-DD`, and
+- Daily identity: `hi-YYYY-MM-DD`, Server-relative `worktrees/YYYY-MM-DD`, and
   `run/health-inspection/daily/YYYY-MM-DD`.
-- The paths above are relative to the parent monorepo root. Every daily linked
-  worktree is a complete monorepo snapshot containing both component trees.
+- The physical worktree path resolves from the parent monorepo root as
+  `huabao-worktree-server/worktrees/YYYY-MM-DD`. That dated directory itself is
+  the root of a complete parent-monorepo linked worktree containing both
+  component trees; it is not a Server-only checkout or nested Git repository.
 - At most one non-terminal workspace may exist at a time and at most one
   workspace may exist for a business date.
 - Python is `>=3.11` and runtime dependencies are standard-library only.
@@ -46,7 +48,7 @@ business calculation code, and workflow decisions.
   Links, undeclared files, missing files, and hash drift fail closed.
 - Seal creates server-owned workspace/archive manifests, checkpoints the daily
   branch, verifies Git clean, and copies only business runtime files to
-  `history/YYYY-MM-DD`.
+  Server-relative `history/YYYY-MM-DD`.
 - Seal verifies that the Dolphin delivery manifest exactly binds the sorted
   pre-seal artifact set. The delivery manifest excludes itself and server-only
   seal manifests; `run_state` changing from `open` to `sealed` is the only
@@ -58,11 +60,22 @@ business calculation code, and workflow decisions.
 - Delete first closes writes, then removes the exact archive, Git worktree,
   daily branch, and SQLite run. Any residue keeps the run in deleting state.
 
-## Source and deployment boundary
+## Source, runtime, and deployment boundary
 
-- Git, SQLite common-dir state, snapshot commits, linked worktrees, branches,
-  and archives are rooted at the parent monorepo. Component-relative paths are
-  used only for Server assets and `shared/.env`.
+- Git objects, refs, worktree registrations, snapshot commits and branches are
+  rooted in the parent monorepo and its single `.git` common dir. Server-owned
+  application state is rooted here instead: `.huabao/` for SQLite/control
+  state, `worktrees/` for complete-monorepo dated linked worktrees, and
+  `history/` for sealed business archives. Parent-root directories with those
+  names are neither authoritative nor valid fallbacks.
+- Runtime `.runtime/`, `input/`, `context/`, and `result/` live at each dated
+  linked-worktree root, for example `worktrees/YYYY-MM-DD/.runtime/`; do not
+  nest them again inside that snapshot's Server component directory.
+- Upgrading from the former parent-root runtime layout requires a stopped-service,
+  controlled migration of SQLite state and stored workspace/archive bindings
+  into this component. If both old and new runtime roots contain state, fail
+  closed; never choose one silently, merge databases heuristically, or replace
+  existing state with a newly initialized empty database.
 - A Server deployment must retain a full monorepo checkout or controlled mirror
   on the host. Packaging only this directory is unsupported because the Server
   must create full-project linked worktrees.

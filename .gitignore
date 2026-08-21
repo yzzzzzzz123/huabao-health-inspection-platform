@@ -8,16 +8,27 @@
 **/.venv/
 .DS_Store
 
-# Authoritative monorepo runtime state. The same anchored rules apply inside a
-# linked worktree because that worktree also checks out the repository root.
-/.huabao/
+# A daily linked worktree checks out this full repository, so its root-local
+# .runtime remains ignored by the same anchored rule.
 /.runtime/
-/worktrees/*
-!/worktrees/.gitkeep
-/history/*
-!/history/.gitkeep
 
-# SQLite files are runtime data even if accidentally created outside .huabao.
+# Authoritative runtime ownership belongs to the Server component. Each dated
+# directory under worktrees is nevertheless a full parent-monorepo worktree.
+/huabao-worktree-server/.huabao/
+/huabao-worktree-server/.runtime/
+/huabao-worktree-server/worktrees/*
+!/huabao-worktree-server/worktrees/.gitkeep
+/huabao-worktree-server/history/*
+!/huabao-worktree-server/history/.gitkeep
+
+# Legacy or misplaced root-level runtime must never be committed or treated as
+# authoritative. New installations do not create these directories.
+/.huabao/
+/worktrees/
+/history/
+
+# SQLite files are runtime data even if accidentally created outside the
+# Server-owned .huabao directory.
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal

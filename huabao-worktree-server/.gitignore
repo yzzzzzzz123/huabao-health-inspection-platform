@@ -5,8 +5,9 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 
-# Machine-local Server state and fail-safe ignores for legacy/misplaced runtime
-# paths. Authoritative state now lives at the parent monorepo root.
+# Machine-local Server state. This component owns the control state, dated
+# linked-worktree placement, and sealed archive roots; Git itself still uses
+# the single parent-monorepo common dir.
 shared/.venv/
 .huabao/
 .runtime/
@@ -14,10 +15,12 @@ shared/.venv/
 *.sqlite3-shm
 *.sqlite3-wal
 
-# Linked worktrees and sealed archives belong at the parent root. Ignore any
-# component-local copies so operational data can never enter a source snapshot.
-worktrees/
-history/
+# Each dated worktree is a complete parent-monorepo checkout even though its
+# physical directory belongs to Server. Keep only the empty directory markers.
+worktrees/*
+!worktrees/.gitkeep
+history/*
+!history/.gitkeep
 
 # The tracked environment contract is the only allowed .env file.
 .env
